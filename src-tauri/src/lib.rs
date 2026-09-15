@@ -1,6 +1,8 @@
 mod archive;
 
 use archive::{ArchiveSummary, CreateOptions};
+use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
 use tauri::Manager;
 
 #[tauri::command]
@@ -28,12 +30,67 @@ fn detect_format(path: String) -> Option<String> {
     archive::Format::from_path(std::path::Path::new(&path)).map(|f| format!("{:?}", f))
 }
 
+/// What Zarc was launched to do, decoded from argv. Populated by the Windows
+/// Explorer context-menu entries registered at install time (see
+/// src-tauri/installer-hooks.nsh) — mirrors WinRAR's Add to archive... /
+/// Add to "name.zip" / Compress and email... items.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "kebab-case")]
+enum LaunchAction {
+    /// "Add to archive..." — open the Archive options dialog prefilled with these paths.
+    AddDialog { paths: Vec<String> },
+    /// "Add to <name>.zip" — build the zip immediately next to the source, no dialog.
+    AddDefault { paths: Vec<String> },
+    /// "Compress and email..." — zip, then reveal the result so it can be attached.
+    AddAndMail { paths: Vec<String> },
+    /// "Extract Here" from the archive's own context menu.
+    ExtractHere { paths: Vec<String> },
+    /// Plain launch, e.g. double-clicking an archive file or opening the app directly.
+    OpenArchive { path: String },
+    None,
+}
+
+struct LaunchState(Mutex<LaunchAction>);
+
+fn parse_launch_action(args: &[String]) -> LaunchAction {
+    // args[0] is the exe path.
+    if args.len() < 2 {
+        return LaunchAction::None;
+    }
+    let flag = args[1].as_str();
+    let rest: Vec<String> = args[2..].to_vec();
+
+    match flag {
+        "--add" if !rest.is_empty() => LaunchAction::AddDialog { paths: rest },
+        "--add-default" if !rest.is_empty() => LaunchAction::AddDefault { paths: rest },
+        "--add-mail" if !rest.is_empty() => LaunchAction::AddAndMail { paths: rest },
+        "--extract-here" if !rest.is_empty() => LaunchAction::ExtractHere { paths: rest },
+        other if archive::Format::from_path(std::path::Path::new(other)).is_some() => {
+            LaunchAction::OpenArchive { path: other.to_string() }
+        }
+        _ => LaunchAction::None,
+    }
+}
+
+#[tauri::command]
+fn get_launch_action(state: tauri::State<LaunchState>) -> LaunchAction {
+    let mut guard = state.0.lock().unwrap();
+    let action = guard.clone();
+    // Only deliver it once per process launch so re-focusing the window later
+    // doesn't replay the same "add these files" action.
+    *guard = LaunchAction::None;
+    action
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let launch_action = parse_launch_action(&std::env::args().collect::<Vec<_>>());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        .manage(LaunchState(Mutex::new(launch_action)))
         .setup(|app| {
             #[cfg(debug_assertions)]
             {
@@ -47,7 +104,8 @@ pub fn run() {
             create_archive,
             extract_archive,
             test_archive,
-            detect_format
+            detect_format,
+            get_launch_action
         ])
         .run(tauri::generate_context!())
         .expect("error while running Zarc");

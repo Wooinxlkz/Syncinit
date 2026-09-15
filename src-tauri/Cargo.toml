@@ -1,6 +1,6 @@
 [package]
 name = "zarc"
-version = "0.1.0"
+version = "0.1.1"
 description = "Zarc — a fast, modern, open-source archive manager (WinRAR alternative) built in Rust + Tauri"
 edition = "2021"
 authors = ["Ch. Abdelkrim"]
