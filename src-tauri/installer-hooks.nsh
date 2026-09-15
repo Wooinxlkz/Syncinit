@@ -16,7 +16,7 @@
   WriteRegStr HKCR "*\shell\Zarc\shell\01_add" "" "Add to archive..."
   WriteRegStr HKCR "*\shell\Zarc\shell\01_add\command" "" '"$INSTDIR\Zarc.exe" --add "%1"'
 
-  WriteRegStr HKCR "*\shell\Zarc\shell\02_add_default" "" "Add to ""%1"".zip"
+  WriteRegStr HKCR "*\shell\Zarc\shell\02_add_default" "" "Add to $\"%1$\".zip"
   WriteRegStr HKCR "*\shell\Zarc\shell\02_add_default\command" "" '"$INSTDIR\Zarc.exe" --add-default "%1"'
 
   WriteRegStr HKCR "*\shell\Zarc\shell\03_add_mail" "" "Compress and email..."
@@ -30,7 +30,7 @@
   WriteRegStr HKCR "Directory\shell\Zarc\shell\01_add" "" "Add to archive..."
   WriteRegStr HKCR "Directory\shell\Zarc\shell\01_add\command" "" '"$INSTDIR\Zarc.exe" --add "%1"'
 
-  WriteRegStr HKCR "Directory\shell\Zarc\shell\02_add_default" "" "Add to ""%1"".zip"
+  WriteRegStr HKCR "Directory\shell\Zarc\shell\02_add_default" "" "Add to $\"%1$\".zip"
   WriteRegStr HKCR "Directory\shell\Zarc\shell\02_add_default\command" "" '"$INSTDIR\Zarc.exe" --add-default "%1"'
 
   WriteRegStr HKCR "Directory\shell\Zarc\shell\03_add_mail" "" "Compress and email..."
