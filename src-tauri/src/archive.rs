@@ -196,7 +196,7 @@ fn list_7z(path: &Path) -> Result<ArchiveSummary> {
             size: entry.size(),
             compressed_size: 0,
             modified: None,
-            crc32: Some(entry.crc32()),
+            crc32: if entry.has_crc { Some(entry.crc as u32) } else { None },
         });
     }
 
@@ -205,7 +205,12 @@ fn list_7z(path: &Path) -> Result<ArchiveSummary> {
         entries,
         total_uncompressed,
         total_compressed: std::fs::metadata(path)?.len(),
-        encrypted: archive.is_encrypted(),
+        encrypted: archive.folders.iter().any(|folder| {
+            folder
+                .coders
+                .iter()
+                .any(|coder| coder.decompression_method_id() == sevenz_rust::SevenZMethod::ID_AES256SHA256)
+        }),
     })
 }
 
@@ -390,14 +395,13 @@ fn extract_tar(path: &Path, dest: &Path, format: Format) -> Result<usize> {
 }
 
 fn extract_7z(path: &Path, dest: &Path, password: Option<&str>) -> Result<usize> {
-    let pw = password.unwrap_or("");
-    sevenz_rust::decompress_file_with_password(path, dest, pw.into())
+    let pw = sevenz_rust::Password::from(password.unwrap_or(""));
+    sevenz_rust::decompress_file_with_password(path, dest, pw.clone())
         .map_err(|e| ArchiveError::SevenZ(e.to_string()))?;
-    let n = sevenz_rust::Archive::open(path)
-        .map_err(|e| ArchiveError::SevenZ(e.to_string()))?
-        .files
-        .len();
-    Ok(n)
+
+    let archive = sevenz_rust::Archive::open_with_password(path, &pw)
+        .map_err(|e| ArchiveError::SevenZ(e.to_string()))?;
+    Ok(archive.files.len())
 }
 
 /// Verify every entry's CRC-32 matches its stored value (zip "Test archive").
