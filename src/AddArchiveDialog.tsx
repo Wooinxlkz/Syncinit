@@ -9,6 +9,7 @@ export interface ArchiveDialogResult {
   deleteAfter: boolean;
   testAfter: boolean;
   comment: string;
+  smartStore: boolean;
 }
 
 interface Props {
@@ -36,12 +37,13 @@ export default function AddArchiveDialog({ defaultName, onCancel, onConfirm }: P
   const [deleteAfter, setDeleteAfter] = useState(false);
   const [testAfter, setTestAfter] = useState(false);
   const [comment, setComment] = useState("");
+  const [smartStore, setSmartStore] = useState(true);
 
   const pwMismatch = password.length > 0 && password !== confirmPw;
 
   function submit() {
     if (pwMismatch) return;
-    onConfirm({ name, format, level, password, deleteAfter, testAfter, comment });
+    onConfirm({ name, format, level, password, deleteAfter, testAfter, comment, smartStore });
   }
 
   return (
@@ -77,14 +79,14 @@ export default function AddArchiveDialog({ defaultName, onCancel, onConfirm }: P
               <div className="field-row">
                 <fieldset className="fieldset">
                   <legend>Archive format</legend>
-                  {(["zip", "tar", "targz", "tarzst"] as Format[]).map((f) => (
+                  {(["arc", "zip", "tar", "targz", "tarzst"] as Format[]).map((f) => (
                     <label key={f} className="radio">
                       <input
                         type="radio"
                         checked={format === f}
                         onChange={() => setFormat(f)}
                       />
-                      {f.toUpperCase()}
+                      {f === "arc" ? "ZARC (.ARC)" : f.toUpperCase()}
                     </label>
                   ))}
                 </fieldset>
@@ -146,8 +148,17 @@ export default function AddArchiveDialog({ defaultName, onCancel, onConfirm }: P
                 />
                 Delete files after archiving
               </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={smartStore}
+                  onChange={(e) => setSmartStore(e.target.checked)}
+                />
+                Smart store for already-compressed files
+              </label>
               <p className="hint">
-                SFX archives, recovery record, and solid archiving are on the roadmap — not in v0.1.1 yet.
+                Smart store avoids spending CPU recompressing JPEG, MP4, ZIP, PDF and other formats that
+                are already compressed.
               </p>
             </>
           )}
@@ -159,7 +170,7 @@ export default function AddArchiveDialog({ defaultName, onCancel, onConfirm }: P
                 rows={6}
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                placeholder="Stored alongside the archive metadata (not yet written into the file itself in v0.1.1)"
+                placeholder="Optional comment stored inside the archive"
               />
             </label>
           )}

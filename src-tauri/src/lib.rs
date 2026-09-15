@@ -16,6 +16,11 @@ fn create_archive(options: CreateOptions) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn delete_sources(sources: Vec<String>, destination: String) -> Result<usize, String> {
+    archive::delete_sources(&sources, &destination).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn extract_archive(path: String, destination: String, password: Option<String>) -> Result<usize, String> {
     archive::extract_archive(&path, &destination, password.as_deref()).map_err(|e| e.to_string())
 }
@@ -33,15 +38,15 @@ fn detect_format(path: String) -> Option<String> {
 /// What Zarc was launched to do, decoded from argv. Populated by the Windows
 /// Explorer context-menu entries registered at install time (see
 /// src-tauri/installer-hooks.nsh) — mirrors WinRAR's Add to archive... /
-/// Add to "name.zip" / Compress and email... items.
+/// Add to "name.arc" / Compress and email... items.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "kebab-case")]
 enum LaunchAction {
     /// "Add to archive..." — open the Archive options dialog prefilled with these paths.
     AddDialog { paths: Vec<String> },
-    /// "Add to <name>.zip" — build the zip immediately next to the source, no dialog.
+    /// "Add to <name>.arc" — build the archive immediately next to the source, no dialog.
     AddDefault { paths: Vec<String> },
-    /// "Compress and email..." — zip, then reveal the result so it can be attached.
+    /// "Compress and email..." — archive, then reveal the result so it can be attached.
     AddAndMail { paths: Vec<String> },
     /// "Extract Here" from the archive's own context menu.
     ExtractHere { paths: Vec<String> },
@@ -102,6 +107,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_archive,
             create_archive,
+            delete_sources,
             extract_archive,
             test_archive,
             detect_format,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { open as openPath } from "@tauri-apps/plugin-shell";
 import { api, formatBytes, type ArchiveSummary } from "./api";
 import { useI18n, SUPPORTED_LOCALES } from "./i18n";
@@ -26,6 +26,27 @@ function basename(p: string) {
   return idx >= 0 ? clean.slice(idx + 1) : clean;
 }
 
+function archiveExtension(format: ArchiveDialogResult["format"]) {
+  return format === "arc"
+    ? ".arc"
+    : format === "targz"
+      ? ".tar.gz"
+      : format === "tarxz"
+        ? ".tar.xz"
+        : format === "tarzst"
+          ? ".tar.zst"
+          : format === "tarbz2"
+            ? ".tar.bz2"
+            : `.${format}`;
+}
+
+function normalizeDestination(name: string, format: ArchiveDialogResult["format"]) {
+  const extension = archiveExtension(format);
+  const archiveNamePattern = /\.(arc|zip|tar|tar\.gz|tgz|tar\.xz|txz|tar\.zst|tar\.bz2|tbz2|7z)$/i;
+  if (archiveNamePattern.test(name)) return name.replace(archiveNamePattern, extension);
+  return `${name}${extension}`;
+}
+
 export default function App() {
   const { t, locale, setLocale } = useI18n();
   const [archivePath, setArchivePath] = useState<string | null>(null);
@@ -35,7 +56,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [dialogSources, setDialogSources] = useState<string[] | null>(null);
 
-  // Pick up context-menu launches: "Add to archive...", "Add to X.zip",
+  // Pick up context-menu launches: "Add to archive...", "Add to X.arc",
   // "Compress and email...", "Extract Here", or a double-clicked archive.
   useEffect(() => {
     invoke<LaunchAction>("get_launch_action").then(async (action) => {
@@ -45,23 +66,25 @@ export default function App() {
           setDialogSources(action.paths);
         } else if (action.mode === "add-default") {
           await runCreate(action.paths, {
-            name: `${basename(action.paths[0])}.zip`,
-            format: "zip",
+            name: `${basename(action.paths[0])}.arc`,
+            format: "arc",
             level: 6,
             password: "",
             deleteAfter: false,
             testAfter: false,
             comment: "",
+            smartStore: true,
           });
         } else if (action.mode === "add-and-mail") {
           const dest = await runCreate(action.paths, {
-            name: `${basename(action.paths[0])}.zip`,
-            format: "zip",
+            name: `${basename(action.paths[0])}.arc`,
+            format: "arc",
             level: 6,
             password: "",
             deleteAfter: false,
             testAfter: false,
             comment: "",
+            smartStore: true,
           });
           if (dest) await openPath(dirname(dest));
         } else if (action.mode === "extract-here") {
@@ -98,13 +121,13 @@ export default function App() {
   async function openArchive() {
     const file = await open({
       multiple: false,
-      filters: [{ name: "Archives", extensions: ["zip", "7z", "tar", "gz", "tgz", "xz", "zst", "bz2"] }],
+      filters: [{ name: "Archives", extensions: ["arc", "zip", "7z", "tar", "gz", "tgz", "xz", "zst", "bz2"] }],
     });
     if (file) await loadArchive(file as string);
   }
 
   async function runCreate(sources: string[], result: ArchiveDialogResult): Promise<string | null> {
-    let destination = result.name;
+    let destination = normalizeDestination(result.name.trim(), result.format);
     if (!destination.includes("/") && !destination.includes("\\")) {
       destination = `${dirname(sources[0])}/${destination}`;
     }
@@ -116,11 +139,18 @@ export default function App() {
         level: result.level,
         format: result.format,
         password: result.password || null,
+        smart_store: result.smartStore,
+        comment: result.comment || null,
       });
       if (result.testAfter) await api.testArchive(destination);
       if (result.deleteAfter) {
-        // Deleting originals is destructive — left for the user to confirm
-        // manually in v0.1.1 rather than silently removing files.
+        const approved = await confirm(
+          `Delete ${sources.length === 1 ? "the original item" : `${sources.length} original items`} after the archive passes${result.testAfter ? " its test" : ""}? This cannot be undone.`,
+          { title: "Zarc — delete originals", kind: "warning" },
+        );
+        if (approved) {
+          await api.deleteSources(sources, destination);
+        }
       }
       await loadArchive(destination);
       return destination;
@@ -244,12 +274,13 @@ export default function App() {
 
       <footer className="status-bar">
         {summary?.encrypted && <span className="badge">{t("status.encrypted")}</span>}
+        {summary?.comment && <span className="archive-comment" title={summary.comment}>“{summary.comment}”</span>}
         <span>{status}</span>
       </footer>
 
       {dialogSources && (
         <AddArchiveDialog
-          defaultName={`${basename(dialogSources[0]).replace(/\.[^/.]+$/, "")}.zip`}
+           defaultName={`${basename(dialogSources[0]).replace(/\.[^/.]+$/, "")}.arc`}
           onCancel={() => setDialogSources(null)}
           onConfirm={async (result: ArchiveDialogResult) => {
             const sources = dialogSources;

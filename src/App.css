@@ -192,6 +192,14 @@ tbody tr.selected {
   font-size: 10.5px;
   letter-spacing: 0.3px;
 }
+.archive-comment {
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-style: italic;
+}
 
 /* ---- Modal (Add to archive) ---- */
 .modal-backdrop {

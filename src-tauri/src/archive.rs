@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -20,6 +20,8 @@ pub enum ArchiveError {
     BadPassword,
     #[error("integrity check failed for entry: {0}")]
     IntegrityFailed(String),
+    #[error("refusing to delete a source that contains the output archive")]
+    UnsafeDelete,
 }
 
 pub type Result<T> = std::result::Result<T, ArchiveError>;
@@ -27,6 +29,7 @@ pub type Result<T> = std::result::Result<T, ArchiveError>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Format {
+    Arc,
     Zip,
     Tar,
     TarGz,
@@ -51,6 +54,8 @@ impl Format {
             Some(Format::Tar)
         } else if name.ends_with(".7z") {
             Some(Format::SevenZ)
+        } else if name.ends_with(".arc") {
+            Some(Format::Arc)
         } else if name.ends_with(".zip") {
             Some(Format::Zip)
         } else {
@@ -58,10 +63,9 @@ impl Format {
         }
     }
 
-    /// Formats Zarc can WRITE natively (v0.1.0). Others are read/extract-only
-    /// until their writers land (see README roadmap).
+    /// Formats Zarc can write natively. Other formats are read/extract-only.
     pub fn is_writable(&self) -> bool {
-        matches!(self, Format::Zip | Format::Tar | Format::TarGz | Format::TarZst)
+        matches!(self, Format::Arc | Format::Zip | Format::Tar | Format::TarGz | Format::TarZst)
     }
 }
 
@@ -82,6 +86,7 @@ pub struct ArchiveSummary {
     pub total_uncompressed: u64,
     pub total_compressed: u64,
     pub encrypted: bool,
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +97,15 @@ pub struct CreateOptions {
     /// 0 = store, 1..=9 mapped to deflate/zstd level depending on format
     pub level: u8,
     pub format: Format,
+    /// Store formats that are already compressed instead of wasting CPU on them.
+    #[serde(default = "default_true")]
+    pub smart_store: bool,
+    #[serde(default)]
+    pub comment: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// List the contents of an archive without extracting it.
@@ -101,7 +115,8 @@ pub fn list_archive(path: &str) -> Result<ArchiveSummary> {
         .ok_or_else(|| ArchiveError::UnsupportedFormat(path.display().to_string()))?;
 
     match format {
-        Format::Zip => list_zip(path),
+        Format::Arc => list_zip(path, Format::Arc),
+        Format::Zip => list_zip(path, Format::Zip),
         Format::Tar | Format::TarGz | Format::TarXz | Format::TarZst | Format::TarBz2 => {
             list_tar(path, format)
         }
@@ -109,7 +124,7 @@ pub fn list_archive(path: &str) -> Result<ArchiveSummary> {
     }
 }
 
-fn list_zip(path: &Path) -> Result<ArchiveSummary> {
+fn list_zip(path: &Path, format: Format) -> Result<ArchiveSummary> {
     let file = File::open(path)?;
     let mut zip = zip::ZipArchive::new(BufReader::new(file))?;
     let mut entries = Vec::with_capacity(zip.len());
@@ -137,11 +152,16 @@ fn list_zip(path: &Path) -> Result<ArchiveSummary> {
     }
 
     Ok(ArchiveSummary {
-        format: Format::Zip,
+        format,
         entries,
         total_uncompressed,
         total_compressed,
         encrypted,
+        comment: if zip.comment().is_empty() {
+            None
+        } else {
+            Some(String::from_utf8_lossy(zip.comment()).into_owned())
+        },
     })
 }
 
@@ -180,6 +200,7 @@ fn list_tar(path: &Path, format: Format) -> Result<ArchiveSummary> {
         total_uncompressed,
         total_compressed: std::fs::metadata(path)?.len(),
         encrypted: false,
+        comment: None,
     })
 }
 
@@ -211,6 +232,7 @@ fn list_7z(path: &Path) -> Result<ArchiveSummary> {
                 .iter()
                 .any(|coder| coder.decompression_method_id() == sevenz_rust::SevenZMethod::ID_AES256SHA256)
         }),
+        comment: None,
     })
 }
 
@@ -224,7 +246,7 @@ pub fn create_archive(opts: &CreateOptions) -> Result<()> {
     }
 
     match opts.format {
-        Format::Zip => create_zip(opts),
+        Format::Arc | Format::Zip => create_zip(opts),
         Format::Tar => create_tar(opts, None),
         Format::TarGz => create_tar(opts, Some(CompressorKind::Gzip)),
         Format::TarZst => create_tar(opts, Some(CompressorKind::Zstd)),
@@ -238,20 +260,17 @@ enum CompressorKind {
 }
 
 fn create_zip(opts: &CreateOptions) -> Result<()> {
-    let file = File::create(&opts.destination)?;
+    let destination = Path::new(&opts.destination);
+    let temp_path = destination.with_extension(format!(
+        "{}.zarc-part-{}",
+        destination.extension().and_then(|e| e.to_str()).unwrap_or("arc"),
+        std::process::id()
+    ));
+    let file = BufWriter::new(File::create(&temp_path)?);
     let mut writer = zip::ZipWriter::new(file);
 
-    let mut file_options: zip::write::FileOptions<()> = zip::write::FileOptions::default()
-        .compression_method(if opts.level == 0 {
-            zip::CompressionMethod::Stored
-        } else {
-            zip::CompressionMethod::Deflated
-        })
-        .compression_level(Some(opts.level.min(9) as i64));
-
-    if let Some(pw) = &opts.password {
-        file_options = file_options
-            .with_aes_encryption(zip::AesMode::Aes256, pw);
+    if let Some(comment) = opts.comment.as_deref().filter(|comment| !comment.trim().is_empty()) {
+        writer.set_comment(comment.to_owned());
     }
 
     for src in &opts.sources {
@@ -272,22 +291,65 @@ fn create_zip(opts: &CreateOptions) -> Result<()> {
                 };
 
                 if path.is_dir() {
-                    writer.add_directory(zip_path, file_options)?;
+                    writer.add_directory(zip_path, zip_options(opts, false))?;
                 } else {
-                    writer.start_file(zip_path, file_options)?;
-                    let mut f = File::open(path)?;
+                    writer.start_file(zip_path, zip_options(opts, should_store(path, opts)))?;
+                    let mut f = BufReader::with_capacity(128 * 1024, File::open(path)?);
                     std::io::copy(&mut f, &mut writer)?;
                 }
             }
         } else {
-            writer.start_file(base_name, file_options)?;
-            let mut f = File::open(&src_path)?;
+            writer.start_file(
+                base_name,
+                zip_options(opts, should_store(&src_path, opts)),
+            )?;
+            let mut f = BufReader::with_capacity(128 * 1024, File::open(&src_path)?);
             std::io::copy(&mut f, &mut writer)?;
         }
     }
 
-    writer.finish()?;
+    writer.finish()?.into_inner().map_err(|e| e.into_error())?.flush()?;
+    if destination.exists() {
+        std::fs::remove_file(destination)?;
+    }
+    std::fs::rename(&temp_path, destination)?;
     Ok(())
+}
+
+fn should_store(path: &Path, opts: &CreateOptions) -> bool {
+    if opts.level == 0 || !opts.smart_store {
+        return opts.level == 0;
+    }
+    matches!(
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| extension.to_ascii_lowercase())
+            .as_deref(),
+        Some(
+            "7z" | "arc" | "avi" | "bz2" | "gz" | "gif" | "heic" | "jpeg" | "jpg" | "m4a"
+                | "m4v" | "mkv" | "mov" | "mp3" | "mp4" | "ogg" | "pdf" | "png" | "rar"
+                | "webm" | "webp" | "xz" | "zip" | "zst"
+        )
+    )
+}
+
+fn zip_options(opts: &CreateOptions, store: bool) -> zip::write::FileOptions<()> {
+    let method = if store {
+        zip::CompressionMethod::Stored
+    } else {
+        zip::CompressionMethod::Deflated
+    };
+    let mut options = zip::write::FileOptions::default()
+        .compression_method(method)
+        .compression_level(if store {
+            None
+        } else {
+            Some(opts.level.min(9) as i64)
+        });
+    if let Some(password) = &opts.password {
+        options = options.with_aes_encryption(zip::AesMode::Aes256, password);
+    }
+    options
 }
 
 fn create_tar(opts: &CreateOptions, compressor: Option<CompressorKind>) -> Result<()> {
@@ -334,7 +396,7 @@ pub fn extract_archive(path: &str, destination: &str, password: Option<&str>) ->
         .ok_or_else(|| ArchiveError::UnsupportedFormat(path.display().to_string()))?;
 
     match format {
-        Format::Zip => extract_zip(path, dest, password),
+        Format::Arc | Format::Zip => extract_zip(path, dest, password),
         Format::Tar | Format::TarGz | Format::TarXz | Format::TarZst | Format::TarBz2 => {
             extract_tar(path, dest, format)
         }
@@ -362,7 +424,7 @@ fn extract_zip(path: &Path, dest: &Path, password: Option<&str>) -> Result<usize
             zip.by_index(i)?
         };
 
-        let out_path = dest.join(entry.name());
+        let out_path = safe_archive_path(dest, entry.name())?;
         if entry.is_dir() {
             std::fs::create_dir_all(&out_path)?;
         } else {
@@ -376,6 +438,21 @@ fn extract_zip(path: &Path, dest: &Path, password: Option<&str>) -> Result<usize
     }
 
     Ok(count)
+}
+
+fn safe_archive_path(destination: &Path, name: &str) -> Result<PathBuf> {
+    let normalized = name.replace('\\', "/");
+    let relative = Path::new(&normalized);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(ArchiveError::UnsupportedFormat(format!(
+            "unsafe archive path: {name}"
+        )));
+    }
+    Ok(destination.join(relative))
 }
 
 fn extract_tar(path: &Path, dest: &Path, format: Format) -> Result<usize> {
@@ -410,7 +487,7 @@ pub fn test_archive(path: &str) -> Result<bool> {
     let format = Format::from_path(path)
         .ok_or_else(|| ArchiveError::UnsupportedFormat(path.display().to_string()))?;
 
-    if format != Format::Zip {
+    if !matches!(format, Format::Arc | Format::Zip) {
         // Non-zip formats: fall back to a full-read sanity check.
         list_archive(path.to_str().unwrap())?;
         return Ok(true);
@@ -441,4 +518,24 @@ pub fn test_archive(path: &str) -> Result<bool> {
         }
     }
     Ok(true)
+}
+
+/// Delete the original inputs only after an archive has been created and the
+/// caller has explicitly confirmed the destructive action in the UI.
+pub fn delete_sources(sources: &[String], destination: &str) -> Result<usize> {
+    let destination = std::fs::canonicalize(destination)?;
+    let mut deleted = 0;
+    for source in sources {
+        let path = std::fs::canonicalize(source)?;
+        if path.is_dir() && destination.starts_with(&path) {
+            return Err(ArchiveError::UnsafeDelete);
+        }
+        if path.is_dir() {
+            std::fs::remove_dir_all(path)?;
+        } else {
+            std::fs::remove_file(path)?;
+        }
+        deleted += 1;
+    }
+    Ok(deleted)
 }
