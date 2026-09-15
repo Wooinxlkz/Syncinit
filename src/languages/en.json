@@ -1,0 +1,22 @@
+{
+  "app.title": "Zarc",
+  "toolbar.add": "Add",
+  "toolbar.extract": "Extract",
+  "toolbar.test": "Test",
+  "toolbar.delete": "Delete",
+  "toolbar.info": "Info",
+  "table.name": "Name",
+  "table.size": "Size",
+  "table.compressed": "Compressed",
+  "table.ratio": "Ratio",
+  "table.modified": "Modified",
+  "status.noArchive": "No archive open — drag & drop a file or click Add",
+  "status.entries": "{count} objects, {size} total",
+  "status.encrypted": "Encrypted",
+  "dialog.password": "Enter password",
+  "dialog.cancel": "Cancel",
+  "dialog.ok": "OK",
+  "toast.testPassed": "All files passed the integrity test",
+  "toast.testFailed": "Integrity check failed for: {name}",
+  "toast.extracted": "Extracted {count} files to {dest}"
+}

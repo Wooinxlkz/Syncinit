@@ -1,0 +1,112 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #26282b;
+  border-bottom: 1px solid #333;
+  -webkit-app-region: drag;
+}
+.app-name {
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.locale-select {
+  -webkit-app-region: no-drag;
+  background: #1e1f22;
+  color: #e6e6e6;
+  border: 1px solid #3a3c40;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #232427;
+  border-bottom: 1px solid #333;
+}
+.toolbar button {
+  background: #2f3236;
+  color: #e6e6e6;
+  border: 1px solid #3f4247;
+  border-radius: 4px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.toolbar button:hover:not(:disabled) {
+  background: #3a8bfd22;
+  border-color: #3a8bfd;
+}
+.toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.path-bar {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #9aa0a6;
+  background: #1e1f22;
+  border-bottom: 1px solid #2a2b2e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table-wrap {
+  flex: 1;
+  overflow: auto;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+thead th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  background: #26282b;
+  padding: 6px 8px;
+  border-bottom: 1px solid #333;
+  color: #9aa0a6;
+  font-weight: 500;
+}
+tbody td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #232427;
+}
+tbody tr:hover {
+  background: #26282b;
+}
+tbody tr.selected {
+  background: #3a8bfd33;
+}
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  color: #9aa0a6;
+  background: #26282b;
+  border-top: 1px solid #333;
+}
+.badge {
+  background: #ffb02e33;
+  color: #ffb02e;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-weight: 600;
+}
