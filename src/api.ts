@@ -31,7 +31,8 @@ export interface CreateOptions {
 }
 
 export const api = {
-  listArchive: (path: string) => invoke<ArchiveSummary>("list_archive", { path }),
+  listArchive: (path: string, password?: string) =>
+    invoke<ArchiveSummary>("list_archive", { path, password: password ?? null }),
   createArchive: (options: CreateOptions) => invoke<void>("create_archive", { options }),
   deleteSources: (sources: string[], destination: string) =>
     invoke<number>("delete_sources", { sources, destination }),

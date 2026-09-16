@@ -65,7 +65,10 @@ impl Format {
 
     /// Formats Zarc can write natively. Other formats are read/extract-only.
     pub fn is_writable(&self) -> bool {
-        matches!(self, Format::Arc | Format::Zip | Format::Tar | Format::TarGz | Format::TarZst)
+        matches!(
+            self,
+            Format::Arc | Format::Zip | Format::Tar | Format::TarGz | Format::TarZst
+        )
     }
 }
 
@@ -109,14 +112,14 @@ fn default_true() -> bool {
 }
 
 /// List the contents of an archive without extracting it.
-pub fn list_archive(path: &str) -> Result<ArchiveSummary> {
+pub fn list_archive(path: &str, password: Option<&str>) -> Result<ArchiveSummary> {
     let path = Path::new(path);
     let format = Format::from_path(path)
         .ok_or_else(|| ArchiveError::UnsupportedFormat(path.display().to_string()))?;
 
     match format {
-        Format::Arc => list_zip(path, Format::Arc),
-        Format::Zip => list_zip(path, Format::Zip),
+        Format::Arc => list_zip(path, Format::Arc, password),
+        Format::Zip => list_zip(path, Format::Zip, password),
         Format::Tar | Format::TarGz | Format::TarXz | Format::TarZst | Format::TarBz2 => {
             list_tar(path, format)
         }
@@ -124,7 +127,8 @@ pub fn list_archive(path: &str) -> Result<ArchiveSummary> {
     }
 }
 
-fn list_zip(path: &Path, format: Format) -> Result<ArchiveSummary> {
+fn list_zip(path: &Path, format: Format, password: Option<&str>) -> Result<ArchiveSummary> {
+    verify_zip_password(path, password)?;
     let file = File::open(path)?;
     let mut zip = zip::ZipArchive::new(BufReader::new(file))?;
     let mut entries = Vec::with_capacity(zip.len());
@@ -144,9 +148,16 @@ fn list_zip(path: &Path, format: Format) -> Result<ArchiveSummary> {
             is_dir: entry.is_dir(),
             size: entry.size(),
             compressed_size: entry.compressed_size(),
-            modified: entry
-                .last_modified()
-                .map(|d| format!("{:04}-{:02}-{:02} {:02}:{:02}", d.year(), d.month(), d.day(), d.hour(), d.minute())),
+            modified: entry.last_modified().map(|d| {
+                format!(
+                    "{:04}-{:02}-{:02} {:02}:{:02}",
+                    d.year(),
+                    d.month(),
+                    d.day(),
+                    d.hour(),
+                    d.minute()
+                )
+            }),
             crc32: Some(entry.crc32()),
         });
     }
@@ -163,6 +174,37 @@ fn list_zip(path: &Path, format: Format) -> Result<ArchiveSummary> {
             Some(String::from_utf8_lossy(zip.comment()).into_owned())
         },
     })
+}
+
+/// Listing raw ZIP metadata does not authenticate an encrypted archive. Do a
+/// complete authenticated read before showing its contents so opening an
+/// encrypted .arc/.zip always requires the password.
+fn verify_zip_password(path: &Path, password: Option<&str>) -> Result<()> {
+    let file = File::open(path)?;
+    let mut zip = zip::ZipArchive::new(BufReader::new(file))?;
+    let mut encrypted = false;
+    for i in 0..zip.len() {
+        let raw = zip.by_index_raw(i)?;
+        if raw.encrypted() {
+            encrypted = true;
+        }
+    }
+    if !encrypted {
+        return Ok(());
+    }
+
+    let password = password.ok_or(ArchiveError::PasswordRequired)?;
+    for i in 0..zip.len() {
+        let encrypted = zip.by_index_raw(i)?.encrypted();
+        if !encrypted {
+            continue;
+        }
+        let mut entry = zip
+            .by_index_decrypt(i, password.as_bytes())
+            .map_err(|_| ArchiveError::BadPassword)?;
+        std::io::copy(&mut entry, &mut std::io::sink()).map_err(|_| ArchiveError::BadPassword)?;
+    }
+    Ok(())
 }
 
 fn list_tar(path: &Path, format: Format) -> Result<ArchiveSummary> {
@@ -205,7 +247,8 @@ fn list_tar(path: &Path, format: Format) -> Result<ArchiveSummary> {
 }
 
 fn list_7z(path: &Path) -> Result<ArchiveSummary> {
-    let archive = sevenz_rust::Archive::open(path).map_err(|e| ArchiveError::SevenZ(e.to_string()))?;
+    let archive =
+        sevenz_rust::Archive::open(path).map_err(|e| ArchiveError::SevenZ(e.to_string()))?;
     let mut entries = Vec::new();
     let mut total_uncompressed = 0u64;
 
@@ -217,7 +260,11 @@ fn list_7z(path: &Path) -> Result<ArchiveSummary> {
             size: entry.size(),
             compressed_size: 0,
             modified: None,
-            crc32: if entry.has_crc { Some(entry.crc as u32) } else { None },
+            crc32: if entry.has_crc {
+                Some(entry.crc as u32)
+            } else {
+                None
+            },
         });
     }
 
@@ -227,10 +274,9 @@ fn list_7z(path: &Path) -> Result<ArchiveSummary> {
         total_uncompressed,
         total_compressed: std::fs::metadata(path)?.len(),
         encrypted: archive.folders.iter().any(|folder| {
-            folder
-                .coders
-                .iter()
-                .any(|coder| coder.decompression_method_id() == sevenz_rust::SevenZMethod::ID_AES256SHA256)
+            folder.coders.iter().any(|coder| {
+                coder.decompression_method_id() == sevenz_rust::SevenZMethod::ID_AES256SHA256
+            })
         }),
         comment: None,
     })
@@ -263,13 +309,20 @@ fn create_zip(opts: &CreateOptions) -> Result<()> {
     let destination = Path::new(&opts.destination);
     let temp_path = destination.with_extension(format!(
         "{}.zarc-part-{}",
-        destination.extension().and_then(|e| e.to_str()).unwrap_or("arc"),
+        destination
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("arc"),
         std::process::id()
     ));
     let file = BufWriter::new(File::create(&temp_path)?);
     let mut writer = zip::ZipWriter::new(file);
 
-    if let Some(comment) = opts.comment.as_deref().filter(|comment| !comment.trim().is_empty()) {
+    if let Some(comment) = opts
+        .comment
+        .as_deref()
+        .filter(|comment| !comment.trim().is_empty())
+    {
         writer.set_comment(comment.to_owned());
     }
 
@@ -281,13 +334,19 @@ fn create_zip(opts: &CreateOptions) -> Result<()> {
             .unwrap_or_default();
 
         if src_path.is_dir() {
-            for entry in walkdir::WalkDir::new(&src_path).into_iter().filter_map(|e| e.ok()) {
+            for entry in walkdir::WalkDir::new(&src_path)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
                 let path = entry.path();
                 let relative = path.strip_prefix(&src_path).unwrap_or(path);
                 let zip_path = if relative.as_os_str().is_empty() {
                     format!("{base_name}/")
                 } else {
-                    format!("{base_name}/{}", relative.to_string_lossy().replace('\\', "/"))
+                    format!(
+                        "{base_name}/{}",
+                        relative.to_string_lossy().replace('\\', "/")
+                    )
                 };
 
                 if path.is_dir() {
@@ -299,16 +358,17 @@ fn create_zip(opts: &CreateOptions) -> Result<()> {
                 }
             }
         } else {
-            writer.start_file(
-                base_name,
-                zip_options(opts, should_store(&src_path, opts)),
-            )?;
+            writer.start_file(base_name, zip_options(opts, should_store(&src_path, opts)))?;
             let mut f = BufReader::with_capacity(128 * 1024, File::open(&src_path)?);
             std::io::copy(&mut f, &mut writer)?;
         }
     }
 
-    writer.finish()?.into_inner().map_err(|e| e.into_error())?.flush()?;
+    writer
+        .finish()?
+        .into_inner()
+        .map_err(|e| e.into_error())?
+        .flush()?;
     if destination.exists() {
         std::fs::remove_file(destination)?;
     }
@@ -326,9 +386,29 @@ fn should_store(path: &Path, opts: &CreateOptions) -> bool {
             .map(|extension| extension.to_ascii_lowercase())
             .as_deref(),
         Some(
-            "7z" | "arc" | "avi" | "bz2" | "gz" | "gif" | "heic" | "jpeg" | "jpg" | "m4a"
-                | "m4v" | "mkv" | "mov" | "mp3" | "mp4" | "ogg" | "pdf" | "png" | "rar"
-                | "webm" | "webp" | "xz" | "zip" | "zst"
+            "7z" | "arc"
+                | "avi"
+                | "bz2"
+                | "gz"
+                | "gif"
+                | "heic"
+                | "jpeg"
+                | "jpg"
+                | "m4a"
+                | "m4v"
+                | "mkv"
+                | "mov"
+                | "mp3"
+                | "mp4"
+                | "ogg"
+                | "pdf"
+                | "png"
+                | "rar"
+                | "webm"
+                | "webp"
+                | "xz"
+                | "zip"
+                | "zst"
         )
     )
 }
@@ -467,7 +547,9 @@ fn extract_tar(path: &Path, dest: &Path, format: Format) -> Result<usize> {
     };
     let mut archive = tar::Archive::new(reader);
     archive.unpack(dest)?;
-    let count = tar::Archive::new(File::open(path).map(|f| f)?).entries()?.count();
+    let count = tar::Archive::new(File::open(path).map(|f| f)?)
+        .entries()?
+        .count();
     Ok(count)
 }
 
@@ -489,7 +571,7 @@ pub fn test_archive(path: &str) -> Result<bool> {
 
     if !matches!(format, Format::Arc | Format::Zip) {
         // Non-zip formats: fall back to a full-read sanity check.
-        list_archive(path.to_str().unwrap())?;
+        list_archive(path.to_str().unwrap(), None)?;
         return Ok(true);
     }
 

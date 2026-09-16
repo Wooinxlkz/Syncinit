@@ -1,10 +1,20 @@
-# Zarc v0.1.2
+# Zarc v0.1.3
 
 Zarc is a fast, open, modern archive manager built with Rust, Tauri v2 and
 React. It is designed as a practical WinRAR alternative with a native
 Windows Explorer workflow and a branded `.arc` format.
 
-## What's new in v0.1.2
+## What's new in v0.1.3
+
+- **Password prompt when opening** — encrypted `.arc` and ZIP archives now
+  authenticate before their contents are displayed, with retry support for an
+  incorrect password. Extraction also prompts and retries when needed.
+- **Windows Explorer registration repair** — Zarc registers its per-user
+  Explorer commands at startup as well as writing them from the NSIS installer,
+  so context-menu actions work for unpacked and development builds too.
+- **In-app context menus** — right-click an archive entry or empty archive area
+  to add files, open an archive, extract, test, select all entries, or clear the
+  current selection.
 
 - **Native `.arc` archives** — `.arc` is a ZIP-compatible container with Zarc's
   bundled logo, AES-256 password support, archive comments and normal ZIP
@@ -48,7 +58,9 @@ bun run tauri build
 ```
 
 The Windows NSIS installer registers the Explorer verbs and the `.arc` file
-association. Install per-machine so the registry integration can be written.
+association. Zarc also refreshes per-user registrations when it starts, which
+helps when running an unpacked executable. Install per-machine for the full
+installer integration.
 
 ## Stack
 
@@ -65,6 +77,7 @@ association. Install per-machine so the registry integration can be written.
 zarc/
 ├─ src/                  React frontend
 │  ├─ AddArchiveDialog.tsx
+│  ├─ PasswordDialog.tsx
 │  ├─ api.ts
 │  └─ App.tsx
 └─ src-tauri/
