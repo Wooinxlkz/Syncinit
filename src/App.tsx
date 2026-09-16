@@ -1,9 +1,11 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
-import { open as openPath } from "@tauri-apps/plugin-shell";
+// (no plugin-shell import — reveal_in_file_manager on the Rust side avoids
+// the console-flash the shell plugin's open() causes on Windows)
 import { api, formatBytes, type ArchiveSummary } from "./api";
-import { useI18n, SUPPORTED_LOCALES } from "./i18n";
+import { useI18n } from "./i18n";
+import { LocaleDropdown } from "./LocaleDropdown";
 import AddArchiveDialog, { type ArchiveDialogResult } from "./AddArchiveDialog";
 import PasswordDialog from "./PasswordDialog";
 import "./App.css";
@@ -82,7 +84,9 @@ export default function App() {
   useEffect(() => {
     // Register in HKCU as well as the installer HKCR entries. This makes the
     // Explorer menu work when running a development build or an unpacked exe.
-    invoke<boolean>("register_context_menu").catch(() => undefined);
+    invoke<boolean>("register_context_menu").catch((err) =>
+      console.warn("Context menu registration failed:", err)
+    );
     const closeMenu = () => setContextMenu(null);
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setContextMenu(null);
@@ -117,7 +121,7 @@ export default function App() {
             comment: "",
             smartStore: true,
           });
-          if (dest) await openPath(dirname(dest));
+          if (dest) await invoke("reveal_in_file_manager", { path: dirname(dest) });
         } else if (action.mode === "extract-here") {
           const src = action.paths[0];
           await extractTo(src, dirname(src));
@@ -187,7 +191,7 @@ export default function App() {
       if (result.deleteAfter) {
         const approved = await confirm(
           `Delete ${sources.length === 1 ? "the original item" : `${sources.length} original items`} after the archive passes${result.testAfter ? " its test" : ""}? This cannot be undone.`,
-          { title: "Zarc — delete originals", kind: "warning" },
+          { title: "Tugur — delete originals", kind: "warning" },
         );
         if (approved) {
           await api.deleteSources(sources, destination);
@@ -284,14 +288,7 @@ export default function App() {
     <div className="app" onContextMenu={showContextMenu}>
       <header className="titlebar">
         <span className="app-name">{t("app.title")}</span>
-        <select className="locale-select" value={locale} onChange={(e) => setLocale(e.target.value)}>
-          {SUPPORTED_LOCALES.map((l) => (
-            <option key={l.code} value={l.code} disabled={!l.ready}>
-              {l.label}
-              {!l.ready ? " (soon)" : ""}
-            </option>
-          ))}
-        </select>
+        <LocaleDropdown locale={locale} onChange={setLocale} />
       </header>
 
       <div className="toolbar">

@@ -1,64 +1,64 @@
-; Registers the Windows Explorer integration used by Zarc.
+; Registers the Windows Explorer integration used by Tugur.
 ; %* lets the command receive every selected path instead of only the
 ; first selected item. The app parses those arguments into one archive job.
 
-!macro ZARC_WRITE_CONTEXT_MENU ROOT
-  WriteRegStr HKCR "${ROOT}\shell\Zarc" "MUIVerb" "Zarc"
-  WriteRegStr HKCR "${ROOT}\shell\Zarc" "SubCommands" ""
-  WriteRegStr HKCR "${ROOT}\shell\Zarc" "Icon" "$INSTDIR\Zarc.exe"
-  WriteRegStr HKCR "${ROOT}\shell\Zarc" "MultiSelectModel" "Player"
+!macro TUGUR_WRITE_CONTEXT_MENU ROOT
+  WriteRegStr HKCR "${ROOT}\shell\Tugur" "MUIVerb" "Tugur"
+  WriteRegStr HKCR "${ROOT}\shell\Tugur" "SubCommands" ""
+  WriteRegStr HKCR "${ROOT}\shell\Tugur" "Icon" "$INSTDIR\Tugur.exe"
+  WriteRegStr HKCR "${ROOT}\shell\Tugur" "MultiSelectModel" "Player"
 
-  WriteRegStr HKCR "${ROOT}\shell\Zarc\shell\01_add" "" "Add to archive..."
-  WriteRegStr HKCR "${ROOT}\shell\Zarc\shell\01_add\command" "" '"$INSTDIR\Zarc.exe" --add %*'
+  WriteRegStr HKCR "${ROOT}\shell\Tugur\shell\01_add" "" "Add to archive..."
+  WriteRegStr HKCR "${ROOT}\shell\Tugur\shell\01_add\command" "" '"$INSTDIR\Tugur.exe" --add %*'
 
-  WriteRegStr HKCR "${ROOT}\shell\Zarc\shell\02_add_default" "" "Add to .arc archive"
-  WriteRegStr HKCR "${ROOT}\shell\Zarc\shell\02_add_default\command" "" '"$INSTDIR\Zarc.exe" --add-default %*'
+  WriteRegStr HKCR "${ROOT}\shell\Tugur\shell\02_add_default" "" "Add to .arc archive"
+  WriteRegStr HKCR "${ROOT}\shell\Tugur\shell\02_add_default\command" "" '"$INSTDIR\Tugur.exe" --add-default %*'
 
-  WriteRegStr HKCR "${ROOT}\shell\Zarc\shell\03_add_mail" "" "Compress and email..."
-  WriteRegStr HKCR "${ROOT}\shell\Zarc\shell\03_add_mail\command" "" '"$INSTDIR\Zarc.exe" --add-mail %*'
+  WriteRegStr HKCR "${ROOT}\shell\Tugur\shell\03_add_mail" "" "Compress and email..."
+  WriteRegStr HKCR "${ROOT}\shell\Tugur\shell\03_add_mail\command" "" '"$INSTDIR\Tugur.exe" --add-mail %*'
 !macroend
 
-!macro ZARC_WRITE_ARCHIVE_MENU EXT
-  WriteRegStr HKCR "SystemFileAssociations\.${EXT}\shell\ZarcExtractHere" "" "Extract Here"
-  WriteRegStr HKCR "SystemFileAssociations\.${EXT}\shell\ZarcExtractHere\command" "" '"$INSTDIR\Zarc.exe" --extract-here "%1"'
-  WriteRegStr HKCR "SystemFileAssociations\.${EXT}\shell\ZarcOpen" "" "Open with Zarc"
-  WriteRegStr HKCR "SystemFileAssociations\.${EXT}\shell\ZarcOpen\command" "" '"$INSTDIR\Zarc.exe" "%1"'
+!macro TUGUR_WRITE_ARCHIVE_MENU EXT
+  WriteRegStr HKCR "SystemFileAssociations\.${EXT}\shell\TugurExtractHere" "" "Extract Here"
+  WriteRegStr HKCR "SystemFileAssociations\.${EXT}\shell\TugurExtractHere\command" "" '"$INSTDIR\Tugur.exe" --extract-here "%1"'
+  WriteRegStr HKCR "SystemFileAssociations\.${EXT}\shell\TugurOpen" "" "Open with Tugur"
+  WriteRegStr HKCR "SystemFileAssociations\.${EXT}\shell\TugurOpen\command" "" '"$INSTDIR\Tugur.exe" "%1"'
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
-  !insertmacro ZARC_WRITE_CONTEXT_MENU "*"
-  !insertmacro ZARC_WRITE_CONTEXT_MENU "Directory"
+  !insertmacro TUGUR_WRITE_CONTEXT_MENU "*"
+  !insertmacro TUGUR_WRITE_CONTEXT_MENU "Directory"
 
   ; Right-clicking empty space inside a directory archives that directory.
-  WriteRegStr HKCR "Directory\Background\shell\Zarc" "MUIVerb" "Zarc"
-  WriteRegStr HKCR "Directory\Background\shell\Zarc" "Icon" "$INSTDIR\Zarc.exe"
-  WriteRegStr HKCR "Directory\Background\shell\Zarc\command" "" '"$INSTDIR\Zarc.exe" --add-default "%V"'
+  WriteRegStr HKCR "Directory\Background\shell\Tugur" "MUIVerb" "Tugur"
+  WriteRegStr HKCR "Directory\Background\shell\Tugur" "Icon" "$INSTDIR\Tugur.exe"
+  WriteRegStr HKCR "Directory\Background\shell\Tugur\command" "" '"$INSTDIR\Tugur.exe" --add-default "%V"'
 
-  !insertmacro ZARC_WRITE_ARCHIVE_MENU "arc"
-  !insertmacro ZARC_WRITE_ARCHIVE_MENU "zip"
-  !insertmacro ZARC_WRITE_ARCHIVE_MENU "7z"
+  !insertmacro TUGUR_WRITE_ARCHIVE_MENU "arc"
+  !insertmacro TUGUR_WRITE_ARCHIVE_MENU "zip"
+  !insertmacro TUGUR_WRITE_ARCHIVE_MENU "7z"
 
-  ; Make .arc a first-class Zarc archive type and use the bundled logo.
-  WriteRegStr HKCR ".arc" "" "Zarc.Archive"
-  WriteRegStr HKCR ".arc" "Content Type" "application/x-zarc"
-  WriteRegStr HKCR "Zarc.Archive" "" "Zarc Archive"
-  WriteRegStr HKCR "Zarc.Archive\DefaultIcon" "" "$INSTDIR\Zarc.exe,0"
-  WriteRegStr HKCR "Zarc.Archive\shell\open\command" "" '"$INSTDIR\Zarc.exe" "%1"'
+  ; Make .arc a first-class Tugur archive type and use the bundled logo.
+  WriteRegStr HKCR ".arc" "" "Tugur.Archive"
+  WriteRegStr HKCR ".arc" "Content Type" "application/x-tugur"
+  WriteRegStr HKCR "Tugur.Archive" "" "Tugur Archive"
+  WriteRegStr HKCR "Tugur.Archive\DefaultIcon" "" "$INSTDIR\Tugur.exe,0"
+  WriteRegStr HKCR "Tugur.Archive\shell\open\command" "" '"$INSTDIR\Tugur.exe" "%1"'
 
   System::Call 'shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
-  DeleteRegKey HKCR "*\shell\Zarc"
-  DeleteRegKey HKCR "Directory\shell\Zarc"
-  DeleteRegKey HKCR "Directory\Background\shell\Zarc"
-  DeleteRegKey HKCR "SystemFileAssociations\.arc\shell\ZarcExtractHere"
-  DeleteRegKey HKCR "SystemFileAssociations\.arc\shell\ZarcOpen"
-  DeleteRegKey HKCR "SystemFileAssociations\.zip\shell\ZarcExtractHere"
-  DeleteRegKey HKCR "SystemFileAssociations\.zip\shell\ZarcOpen"
-  DeleteRegKey HKCR "SystemFileAssociations\.7z\shell\ZarcExtractHere"
-  DeleteRegKey HKCR "SystemFileAssociations\.7z\shell\ZarcOpen"
-  DeleteRegKey HKCR "Zarc.Archive"
+  DeleteRegKey HKCR "*\shell\Tugur"
+  DeleteRegKey HKCR "Directory\shell\Tugur"
+  DeleteRegKey HKCR "Directory\Background\shell\Tugur"
+  DeleteRegKey HKCR "SystemFileAssociations\.arc\shell\TugurExtractHere"
+  DeleteRegKey HKCR "SystemFileAssociations\.arc\shell\TugurOpen"
+  DeleteRegKey HKCR "SystemFileAssociations\.zip\shell\TugurExtractHere"
+  DeleteRegKey HKCR "SystemFileAssociations\.zip\shell\TugurOpen"
+  DeleteRegKey HKCR "SystemFileAssociations\.7z\shell\TugurExtractHere"
+  DeleteRegKey HKCR "SystemFileAssociations\.7z\shell\TugurOpen"
+  DeleteRegKey HKCR "Tugur.Archive"
   DeleteRegValue HKCR ".arc" ""
   DeleteRegValue HKCR ".arc" "Content Type"
 

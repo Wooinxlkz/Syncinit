@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main Zarc window",
+  "description": "Capabilities for the main Tugur window",
   "windows": ["main"],
   "permissions": [
     "core:default",

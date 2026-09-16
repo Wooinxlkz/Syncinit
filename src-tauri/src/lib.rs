@@ -6,20 +6,15 @@ use std::sync::Mutex;
 use tauri::Manager;
 
 #[cfg(windows)]
-fn reg_add(key: &str, value: Option<&str>, data: &str) -> Result<(), String> {
-    let mut command = std::process::Command::new("reg.exe");
-    command.args(["add", key]);
-    if let Some(value) = value {
-        command.args(["/v", value]);
+fn set_reg_value(path: &str, name: &str, data: &str) -> std::io::Result<()> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = hkcu.create_subkey(path)?;
+    if name.is_empty() {
+        key.set_value("", &data)
     } else {
-        command.arg("/ve");
-    }
-    command.args(["/t", "REG_SZ", "/d", data, "/f"]);
-    let status = command.status().map_err(|e| e.to_string())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("reg.exe failed for {key}"))
+        key.set_value(name, &data)
     }
 }
 
@@ -32,85 +27,138 @@ fn register_context_menu() -> Result<bool, String> {
 
     #[cfg(windows)]
     {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let exe = format!("\"{}\"", exe.to_string_lossy());
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
 
-        for root in [
-            "HKCU\\Software\\Classes\\*",
-            "HKCU\\Software\\Classes\\Directory",
-        ] {
-            let menu = format!("{root}\\shell\\Zarc");
-            reg_add(&menu, Some("MUIVerb"), "Zarc")?;
-            reg_add(&menu, Some("Icon"), &format!("{exe},0"))?;
-            reg_add(&menu, Some("MultiSelectModel"), "Player")?;
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe_str = exe.to_string_lossy().to_string();
+        let exe_quoted = format!("\"{exe_str}\"");
+
+        // Idempotency check: skip the ~40 registry writes below entirely if
+        // they already point at this exact exe path (e.g. every app launch,
+        // not just the first). This — plus writing directly via the Win32
+        // registry API instead of spawning `reg.exe` per value, which was
+        // both flashing a console window each time (no window station to
+        // attach a new console to without CREATE_NO_WINDOW) and adding real
+        // process-spawn overhead 40+ times over — is what was causing the
+        // freeze and the console flicker on every startup.
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        if let Ok(existing) = hkcu
+            .open_subkey("Software\\Classes\\*\\shell\\Tugur\\shell\\01_add\\command")
+            .and_then(|k| k.get_value::<String, _>(""))
+        {
+            if existing == format!("{exe_quoted} --add %*") {
+                return Ok(true);
+            }
+        }
+
+        for root in ["Software\\Classes\\*", "Software\\Classes\\Directory"] {
+            let menu = format!("{root}\\shell\\Tugur");
+            set_reg_value(&menu, "MUIVerb", "Tugur").map_err(|e| e.to_string())?;
+            set_reg_value(&menu, "Icon", &format!("{exe_str},0")).map_err(|e| e.to_string())?;
+            set_reg_value(&menu, "MultiSelectModel", "Player").map_err(|e| e.to_string())?;
+            set_reg_value(&menu, "SubCommands", "").map_err(|e| e.to_string())?;
 
             let add = format!("{menu}\\shell\\01_add");
-            reg_add(&add, None, "Add to archive...")?;
-            reg_add(&format!("{add}\\command"), None, &format!("{exe} --add %*"))?;
+            set_reg_value(&add, "", "Add to archive...").map_err(|e| e.to_string())?;
+            set_reg_value(&format!("{add}\\command"), "", &format!("{exe_quoted} --add %*"))
+                .map_err(|e| e.to_string())?;
 
             let quick = format!("{menu}\\shell\\02_add_default");
-            reg_add(&quick, None, "Add to .arc archive")?;
-            reg_add(
+            set_reg_value(&quick, "", "Add to .arc archive").map_err(|e| e.to_string())?;
+            set_reg_value(
                 &format!("{quick}\\command"),
-                None,
-                &format!("{exe} --add-default %*"),
-            )?;
+                "",
+                &format!("{exe_quoted} --add-default %*"),
+            )
+            .map_err(|e| e.to_string())?;
 
             let mail = format!("{menu}\\shell\\03_add_mail");
-            reg_add(&mail, None, "Compress and email...")?;
-            reg_add(
+            set_reg_value(&mail, "", "Compress and email...").map_err(|e| e.to_string())?;
+            set_reg_value(
                 &format!("{mail}\\command"),
-                None,
-                &format!("{exe} --add-mail %*"),
-            )?;
+                "",
+                &format!("{exe_quoted} --add-mail %*"),
+            )
+            .map_err(|e| e.to_string())?;
         }
 
-        let background = "HKCU\\Software\\Classes\\Directory\\Background\\shell\\Zarc";
-        reg_add(background, Some("MUIVerb"), "Zarc")?;
-        reg_add(background, Some("Icon"), &format!("{exe},0"))?;
-        reg_add(
+        let background = "Software\\Classes\\Directory\\Background\\shell\\Tugur";
+        set_reg_value(background, "MUIVerb", "Tugur").map_err(|e| e.to_string())?;
+        set_reg_value(background, "Icon", &format!("{exe_str},0")).map_err(|e| e.to_string())?;
+        set_reg_value(
             &format!("{background}\\command"),
-            None,
-            &format!("{exe} --add-default \"%V\""),
-        )?;
+            "",
+            &format!("{exe_quoted} --add-default \"%V\""),
+        )
+        .map_err(|e| e.to_string())?;
 
         for extension in ["arc", "zip", "7z"] {
-            let base =
-                format!("HKCU\\Software\\Classes\\SystemFileAssociations\\.{extension}\\shell");
-            let extract = format!("{base}\\ZarcExtractHere");
-            reg_add(&extract, None, "Extract Here")?;
-            reg_add(
+            let base = format!("Software\\Classes\\SystemFileAssociations\\.{extension}\\shell");
+            let extract = format!("{base}\\TugurExtractHere");
+            set_reg_value(&extract, "", "Extract Here").map_err(|e| e.to_string())?;
+            set_reg_value(
                 &format!("{extract}\\command"),
-                None,
-                &format!("{exe} --extract-here \"%1\""),
-            )?;
+                "",
+                &format!("{exe_quoted} --extract-here \"%1\""),
+            )
+            .map_err(|e| e.to_string())?;
 
-            let open = format!("{base}\\ZarcOpen");
-            reg_add(&open, None, "Open with Zarc")?;
-            reg_add(&format!("{open}\\command"), None, &format!("{exe} \"%1\""))?;
+            let open = format!("{base}\\TugurOpen");
+            set_reg_value(&open, "", "Open with Tugur").map_err(|e| e.to_string())?;
+            set_reg_value(&format!("{open}\\command"), "", &format!("{exe_quoted} \"%1\""))
+                .map_err(|e| e.to_string())?;
         }
 
-        let arc_type = "HKCU\\Software\\Classes\\.arc";
-        reg_add(arc_type, None, "Zarc.Archive")?;
-        reg_add(arc_type, Some("Content Type"), "application/x-zarc")?;
-        reg_add(
-            "HKCU\\Software\\Classes\\Zarc.Archive",
-            None,
-            "Zarc Archive",
-        )?;
-        reg_add(
-            "HKCU\\Software\\Classes\\Zarc.Archive\\DefaultIcon",
-            None,
-            &format!("{exe},0"),
-        )?;
-        reg_add(
-            "HKCU\\Software\\Classes\\Zarc.Archive\\shell\\open\\command",
-            None,
-            &format!("{exe} \"%1\""),
-        )?;
+        let arc_type = "Software\\Classes\\.arc";
+        set_reg_value(arc_type, "", "Tugur.Archive").map_err(|e| e.to_string())?;
+        set_reg_value(arc_type, "Content Type", "application/x-tugur").map_err(|e| e.to_string())?;
+        set_reg_value("Software\\Classes\\Tugur.Archive", "", "Tugur Archive").map_err(|e| e.to_string())?;
+        set_reg_value(
+            "Software\\Classes\\Tugur.Archive\\DefaultIcon",
+            "",
+            &format!("{exe_str},0"),
+        )
+        .map_err(|e| e.to_string())?;
+        set_reg_value(
+            "Software\\Classes\\Tugur.Archive\\shell\\open\\command",
+            "",
+            &format!("{exe_quoted} \"%1\""),
+        )
+        .map_err(|e| e.to_string())?;
 
         Ok(true)
     }
+}
+
+/// Opens `path` in the OS file manager. Deliberately not using
+/// `tauri-plugin-shell`'s `open()` here: on Windows that shells through
+/// `cmd /C start`, which flashes a console window for a frame even though
+/// it exits instantly — the other source of the "cmd sometimes opening"
+/// symptom (the registry registration above was the frequent one).
+/// `explorer.exe` spawned directly with `CREATE_NO_WINDOW` has no console
+/// to flash in the first place.
+#[tauri::command]
+fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("explorer.exe")
+            .arg(&path)
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(&path).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open").arg(&path).spawn().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -147,7 +195,7 @@ fn detect_format(path: String) -> Option<String> {
     archive::Format::from_path(std::path::Path::new(&path)).map(|f| format!("{:?}", f))
 }
 
-/// What Zarc was launched to do, decoded from argv. Populated by the Windows
+/// What Tugur was launched to do, decoded from argv. Populated by the Windows
 /// Explorer context-menu entries registered at install time (see
 /// src-tauri/installer-hooks.nsh) — mirrors WinRAR's Add to archive... /
 /// Add to "name.arc" / Compress and email... items.
@@ -230,6 +278,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             register_context_menu,
+            reveal_in_file_manager,
             list_archive,
             create_archive,
             delete_sources,
@@ -239,5 +288,5 @@ pub fn run() {
             get_launch_action
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Zarc");
+        .expect("error while running Tugur");
 }

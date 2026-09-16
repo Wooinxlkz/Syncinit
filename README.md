@@ -1,29 +1,35 @@
-# Zarc v0.1.3
+# Tugur v0.1.4
 
-Zarc is a fast, open, modern archive manager built with Rust, Tauri v2 and
-React. It is designed as a practical WinRAR alternative with a native
-Windows Explorer workflow and a branded `.arc` format.
+Tugur (formerly Zarc) is a fast, open, modern archive manager built with
+Rust, Tauri v2 and React. It is designed as a practical WinRAR alternative
+with a native Windows Explorer workflow and a branded `.arc` format.
+
+## What's new in v0.1.4
+- Rebrand: Zarc → Tugur, new app icon/logo throughout (taskbar, window,
+  installer, file associations)
+- Custom-branded NSIS installer: `setup.exe` now uses the new icon, plus a
+  header/sidebar image built from the same logo (`src-tauri/installer/`)
 
 ## What's new in v0.1.3
 
 - **Password prompt when opening** — encrypted `.arc` and ZIP archives now
   authenticate before their contents are displayed, with retry support for an
   incorrect password. Extraction also prompts and retries when needed.
-- **Windows Explorer registration repair** — Zarc registers its per-user
+- **Windows Explorer registration repair** — Tugur registers its per-user
   Explorer commands at startup as well as writing them from the NSIS installer,
   so context-menu actions work for unpacked and development builds too.
 - **In-app context menus** — right-click an archive entry or empty archive area
   to add files, open an archive, extract, test, select all entries, or clear the
   current selection.
 
-- **Native `.arc` archives** — `.arc` is a ZIP-compatible container with Zarc's
+- **Native `.arc` archives** — `.arc` is a ZIP-compatible container with Tugur's
   bundled logo, AES-256 password support, archive comments and normal ZIP
   interoperability.
 - **Explorer multi-select actions** — select one or many files/folders and use
-  Zarc → Add to archive..., Add to .arc archive, or Compress and email....
-- **Archive file integration** — `.arc` files open with Zarc and expose
-  Extract Here and Open with Zarc in Explorer. ZIP and 7z keep their existing
-  Zarc actions.
+  Tugur → Add to archive..., Add to .arc archive, or Compress and email....
+- **Archive file integration** — `.arc` files open with Tugur and expose
+  Extract Here and Open with Tugur in Explorer. ZIP and 7z keep their existing
+  Tugur actions.
 - **Smart store** — JPEG, PNG, MP4, PDF, ZIP, 7z and other formats that are
   already compressed are stored without wasting time recompressing them.
 - **Faster and safer creation** — buffered I/O, a 128 KiB read buffer, atomic
@@ -40,8 +46,8 @@ Windows Explorer workflow and a branded `.arc` format.
   `.tar.zst`, `.tar.bz2`/`.tbz2`, and `.7z`
 - Create: `.arc`, `.zip`, `.tar`, `.tar.gz`, and `.tar.zst`
 
-Zarc does not create proprietary `.rar` files. The `.arc` format is the
-branded, open ZIP-compatible alternative: it is readable by Zarc and can be
+Tugur does not create proprietary `.rar` files. The `.arc` format is the
+branded, open ZIP-compatible alternative: it is readable by Tugur and can be
 opened by ZIP tools that inspect file signatures rather than extensions.
 
 ## Run it
@@ -58,7 +64,7 @@ bun run tauri build
 ```
 
 The Windows NSIS installer registers the Explorer verbs and the `.arc` file
-association. Zarc also refreshes per-user registrations when it starts, which
+association. Tugur also refreshes per-user registrations when it starts, which
 helps when running an unpacked executable. Install per-machine for the full
 installer integration.
 
@@ -74,7 +80,7 @@ installer integration.
 ## Project layout
 
 ```text
-zarc/
+tugur/
 ├─ src/                  React frontend
 │  ├─ AddArchiveDialog.tsx
 │  ├─ PasswordDialog.tsx

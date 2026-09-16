@@ -1,12 +1,12 @@
 [package]
-name = "zarc"
-version = "0.1.3"
-description = "Zarc — a fast, modern, open-source archive manager (WinRAR alternative) built in Rust + Tauri"
+name = "tugur"
+version = "0.1.4"
+description = "Tugur — a fast, modern, open-source archive manager (WinRAR alternative) built in Rust + Tauri"
 edition = "2021"
 authors = ["Ch. Abdelkrim"]
 
 [lib]
-name = "zarc_lib"
+name = "tugur_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -48,6 +48,14 @@ chrono = { version = "0.4", features = ["serde"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Direct Win32 registry access for the context-menu registration — replaces
+# shelling out to reg.exe (see lib.rs `register_context_menu`): spawning a
+# process per registry value was both the console-flash bug and a real
+# source of startup lag (40+ process spawns, each one more overhead for AV
+# scanners to hook), since it ran on every launch.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
 
 [profile.release]
 opt-level = 3

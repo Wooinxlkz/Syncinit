@@ -1,6 +1,6 @@
 {
-  "name": "zarc",
-  "version": "0.1.3",
+  "name": "tugur",
+  "version": "0.1.4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,6 +12,7 @@
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "motion": "^11.15.0",
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-dialog": "^2.0.1",
     "@tauri-apps/plugin-fs": "^2.0.2",

@@ -63,7 +63,7 @@ impl Format {
         }
     }
 
-    /// Formats Zarc can write natively. Other formats are read/extract-only.
+    /// Formats Tugur can write natively. Other formats are read/extract-only.
     pub fn is_writable(&self) -> bool {
         matches!(
             self,
@@ -308,7 +308,7 @@ enum CompressorKind {
 fn create_zip(opts: &CreateOptions) -> Result<()> {
     let destination = Path::new(&opts.destination);
     let temp_path = destination.with_extension(format!(
-        "{}.zarc-part-{}",
+        "{}.tugur-part-{}",
         destination
             .extension()
             .and_then(|e| e.to_str())

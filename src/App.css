@@ -1,5 +1,5 @@
-/* Design tokens copied 1:1 from Xuro (src/styles.css .dark block) so Zarc's
-   palette and feel match it exactly. Zarc is dark-only for now, so these are
+/* Design tokens copied 1:1 from Xuro (src/styles.css .dark block) so Tugur's
+   palette and feel match it exactly. Tugur is dark-only for now, so these are
    just set on :root rather than split into a light/.dark pair — copy Xuro's
    :root block here too if a light theme gets added later. */
 :root {
@@ -449,4 +449,128 @@ tbody tr.selected {
 .context-menu button:disabled {
   color: var(--faint);
   cursor: default;
+}
+
+.link-btn {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--muted, #9aa0a6);
+  font-size: 11.5px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease;
+}
+.link-btn:hover {
+  color: var(--ink, #ebebe8);
+}
+
+/* ---- Progress bar (create/extract) ---- */
+.progress-bar-track {
+  height: 4px;
+  width: 100%;
+  background: var(--line, #292927);
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--ink, #ebebe8);
+  transition: width 0.12s ease-out;
+}
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--muted, #9aa0a6);
+  background: var(--panel, #151515);
+  border-bottom: 1px solid var(--line, #292927);
+}
+.progress-row button {
+  background: transparent;
+  border: 1px solid var(--line, #292927);
+  color: var(--muted, #9aa0a6);
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.progress-row button:hover {
+  color: var(--ink, #ebebe8);
+  border-color: var(--faint, #64645f);
+}
+
+/* ---- Locale dropdown (matches Xuro's ContextMenu surface styling) ---- */
+.locale-dropdown {
+  position: relative;
+}
+.locale-trigger {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--sunken, #0f0f0f);
+  color: var(--ink, #ebebe8);
+  border: 1px solid var(--line, #292927);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.locale-trigger:hover {
+  background: var(--hover);
+  border-color: var(--faint, #64645f);
+}
+.locale-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 100;
+  min-width: 180px;
+  max-height: 280px;
+  overflow-y: auto;
+  border-radius: 8px;
+  border: 1px solid var(--line, #292927);
+  background: var(--bg, #1a1a1a);
+  padding: 4px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  animation: localePanelIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes localePanelIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.locale-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink, #ebebe8);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.locale-option:hover:not(:disabled) {
+  background: var(--hover);
+}
+.locale-option[aria-selected="true"] {
+  background: var(--active);
+}
+.locale-option:disabled {
+  color: var(--faint, #64645f);
+  cursor: default;
+}
+.locale-option-soon {
+  font-size: 10px;
+  color: var(--faint, #64645f);
 }

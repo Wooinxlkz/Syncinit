@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Format } from "./api";
+import { OTPInput } from "./OTPInput";
 
 export interface ArchiveDialogResult {
   name: string;
@@ -32,18 +33,27 @@ export default function AddArchiveDialog({ defaultName, onCancel, onConfirm }: P
   const [name, setName] = useState(defaultName);
   const [format, setFormat] = useState<Format>("zip");
   const [level, setLevel] = useState(6);
-  const [password, setPassword] = useState("");
-  const [confirmPw, setConfirmPw] = useState("");
+  const [pinEnabled, setPinEnabled] = useState(false);
+  const [pin, setPin] = useState("");
   const [deleteAfter, setDeleteAfter] = useState(false);
   const [testAfter, setTestAfter] = useState(false);
   const [comment, setComment] = useState("");
   const [smartStore, setSmartStore] = useState(true);
 
-  const pwMismatch = password.length > 0 && password !== confirmPw;
+  const pinIncomplete = pinEnabled && pin.length > 0 && pin.length < 6;
 
   function submit() {
-    if (pwMismatch) return;
-    onConfirm({ name, format, level, password, deleteAfter, testAfter, comment, smartStore });
+    if (pinIncomplete) return;
+    onConfirm({
+      name,
+      format,
+      level,
+      password: pinEnabled ? pin : "",
+      deleteAfter,
+      testAfter,
+      comment,
+      smartStore,
+    });
   }
 
   return (
@@ -86,7 +96,7 @@ export default function AddArchiveDialog({ defaultName, onCancel, onConfirm }: P
                         checked={format === f}
                         onChange={() => setFormat(f)}
                       />
-                      {f === "arc" ? "ZARC (.ARC)" : f.toUpperCase()}
+                      {f === "arc" ? "TUGUR (.ARC)" : f.toUpperCase()}
                     </label>
                   ))}
                 </fieldset>
@@ -107,24 +117,29 @@ export default function AddArchiveDialog({ defaultName, onCancel, onConfirm }: P
 
           {tab === "advanced" && (
             <>
-              <label className="field">
-                <span>Password (AES-256, optional)</span>
+              <label className="checkbox">
                 <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  type="checkbox"
+                  checked={pinEnabled}
+                  onChange={(e) => setPinEnabled(e.target.checked)}
                 />
+                Protect with a PIN (AES-256)
               </label>
-              <label className="field">
-                <span>Confirm password</span>
-                <input
-                  type="password"
-                  value={confirmPw}
-                  onChange={(e) => setConfirmPw(e.target.value)}
+              {pinEnabled && (
+                <OTPInput
+                  length={6}
+                  label="6-digit PIN"
+                  value={pin}
+                  onChange={setPin}
+                  status={pinIncomplete ? "error" : "idle"}
+                  errorMessage={pinIncomplete ? "Enter all 6 digits" : undefined}
+                  autoFocus
                 />
-              </label>
-              {pwMismatch && <div className="field-error">Passwords don't match</div>}
+              )}
               <p className="hint">
+                The PIN is used directly as the AES-256 password — since an archive has to
+                open on any machine, there's no OS keychain to fall back on like Xuro's
+                note-lock PINs have, so the 6 digits carry all the protection themselves.
                 Zip password protection uses real AES-256, not legacy ZipCrypto.
               </p>
             </>
@@ -180,7 +195,7 @@ export default function AddArchiveDialog({ defaultName, onCancel, onConfirm }: P
           <button className="btn-secondary" onClick={onCancel}>
             Cancel
           </button>
-          <button className="btn-primary" onClick={submit} disabled={pwMismatch || !name.trim()}>
+          <button className="btn-primary" onClick={submit} disabled={pinIncomplete || !name.trim()}>
             OK
           </button>
         </div>
