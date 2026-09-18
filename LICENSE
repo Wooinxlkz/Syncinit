@@ -1,0 +1,49 @@
+Syncinit — Proprietary License
+
+Copyright (c) 2026 Ch. Abdelkrim. All rights reserved.
+
+This software ("Syncinit") and its source code are the exclusive property of
+the copyright holder. No license, right, or permission is granted to any
+person to copy, modify, merge, publish, distribute, sublicense, sell,
+reverse-engineer, or create derivative works of this software or its
+source code, in whole or in part, except as explicitly and separately
+authorized in writing by the copyright holder.
+
+## What you may do
+
+- Download and run the compiled, officially distributed builds of Syncinit
+  for your own personal or internal use, free of charge.
+
+## What you may not do
+
+- Copy, redistribute, rehost, or repackage Syncinit (compiled or source) on
+  any other download platform, mirror, or store without written
+  permission.
+- Modify the source code and distribute the modified version, under this
+  name or any other.
+- Use the Syncinit name, logo, or branding for a derivative or unrelated
+  project.
+- Claim authorship of, or remove attribution from, any part of this
+  software.
+
+## No warranty
+
+Syncinit is provided "as is," without warranty of any kind, express or
+implied, including but not limited to warranties of merchantability,
+fitness for a particular purpose, and non-infringement. Use it at your own
+risk — see TERMS.md for the full disclaimer and liability terms.
+
+## Third-party components
+
+Syncinit is built on open-source components (Tauri, React, various Rust
+crates), each remaining under its own respective open-source license.
+Using those components under their own licenses does not grant any
+license to Syncinit's own original source code. See THIRD-PARTY-NOTICES.md
+for the full list.
+
+## Contact
+
+For licensing requests outside the scope above (e.g. bundling Syncinit into
+another product, contributing code, or anything not covered by "download
+and run the compiled build"), open an issue at the project's GitHub
+repository or contact the copyright holder directly.

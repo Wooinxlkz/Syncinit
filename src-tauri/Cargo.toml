@@ -1,12 +1,12 @@
 [package]
-name = "tugur"
-version = "0.1.4"
-description = "Tugur — a fast, modern, open-source archive manager (WinRAR alternative) built in Rust + Tauri"
+name = "syncinit"
+version = "0.1.7"
+description = "Syncinit — a fast, modern archive manager (WinRAR alternative) built in Rust + Tauri"
 edition = "2021"
 authors = ["Ch. Abdelkrim"]
 
 [lib]
-name = "tugur_lib"
+name = "syncinit_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -26,7 +26,7 @@ sevenz-rust = { version = "0.6", features = ["aes256"] }
 tar = "0.4"
 flate2 = "1"
 xz2 = "0.1"
-zstd = "0.13"
+zstd = { version = "0.13", features = ["zstdmt"] }
 bzip2 = "0.4"
 crc32fast = "1"
 

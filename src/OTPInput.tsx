@@ -1,12 +1,12 @@
 // Adapted from Xuro's src/components/blocks/otp-input.tsx (same project,
-// same author) for use as Tugur's PIN entry. Kept the core mechanics as-is
+// same author) for use as Syncinit's PIN entry. Kept the core mechanics as-is
 // (fixed-length slot array so a cleared middle slot stays a hole, single
 // hidden-input-drives-everything approach, keyboard/paste/autofill
 // handling, caret blink, per-digit enter/exit animation, error shake) and
-// changed: Tailwind classes → Tugur's CSS variables (src/OTPInput.css,
-// since this project has no Tailwind config), slot size smaller (Tugur asked
+// changed: Tailwind classes → Syncinit's CSS variables (src/OTPInput.css,
+// since this project has no Tailwind config), slot size smaller (Syncinit asked
 // for "smaller" — 40px instead of Xuro's 56px), dropped the success
-// checkmark glyph since Tugur's PIN entry never has a "success" state to
+// checkmark glyph since Syncinit's PIN entry never has a "success" state to
 // show it in.
 import { AnimatePresence, animate, motion, useReducedMotion } from "motion/react";
 import { useEffect, useId, useRef, useState } from "react";

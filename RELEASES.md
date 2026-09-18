@@ -1,0 +1,140 @@
+# Releases
+
+## v0.1.7
+
+- **Rebrand: Tugur → Syncinit**, and the archive format extension
+  `.arc` → `.init` throughout — registry, file associations, UI labels,
+  docs. (Older bullets below now read "Syncinit"/".init" too, for
+  consistency, except the line documenting the original Zarc rename,
+  which stays as it was written.)
+- **Two distinct icons**, not one reused everywhere: the app itself uses
+  the new "eye" logo; `.init` files in Explorer get a separate "wrapped
+  box" icon, embedded directly in the binary and written out next to the
+  exe at runtime — chosen over an unverified Tauri config field so it
+  didn't risk silently doing nothing.
+- New NSIS installer header/sidebar branding built from the new logo.
+- **Icon toolbar**, WinRAR-style: Add, Extract, Test, Delete, Find, Info,
+  Comment — each a real, wired action, nothing decorative. Deliberately
+  left out: View (would need safe per-entry extraction-and-open, not
+  built yet), Wizard (redundant with the existing Add dialog), VirusScan
+  (no AV integration exists — a visible button for this would be actively
+  misleading), SFX (still not built, see prior releases).
+- **Top menu bar** — File / Commands / Favorites / Tools / Options / Help,
+  each item real: Favorites is an actual recently-opened list backed by
+  localStorage; Options lists the ready locales; Help opens a real About
+  panel.
+- **New backend feature**: delete entries from an existing archive
+  (rebuilds it without them). Uses the same decompress-then-recompress
+  approach as the rest of the codebase rather than a faster raw-copy API
+  that couldn't be verified without a working `cargo build` — slower on
+  large files, but nothing here risks producing a corrupt archive.
+- Find/filter box for the entry table; an Info panel (format, entry count,
+  sizes, encryption status); a full-comment view.
+- Caught and fixed a self-introduced bug before it shipped: a careless
+  edit briefly deleted the `#[cfg(not(windows))]` guard on the
+  context-menu registration function, which would have made it always
+  report success without doing anything, on every platform.
+
+## v0.1.6
+
+- **Progress bars + Cancel**, for real this time — every create/extract now
+  reports live `done/total` bytes to the UI (throttled to ~20 updates/sec
+  so it can't flood the webview and stutter the app the way an earlier,
+  unthrottled attempt did), and a Cancel button actually stops the
+  operation mid-file rather than just hiding a spinner over work that kept
+  running underneath.
+- Cancelling — or any failed create — no longer leaves a half-written
+  `.init`/`.zip` file behind; it's built to a temp file and only renamed
+  into place on success, cleaned up otherwise.
+- **Real multi-threaded compression for `.tar.zst`** via libzstd's own
+  worker-thread pool (`zstd`'s `zstdmt` feature), not a hand-rolled
+  approximation.
+- **Honest limitation, not silently skipped**: `.init`/`.zip`/`.tar.gz`
+  compression is *not* multi-threaded in this version. The `zip` crate
+  writes to one sequential output stream, and doing this safely needs a
+  raw-precompressed-entry write path I couldn't verify compiles correctly
+  without a working `cargo build` in the environment this was written in —
+  shipping unverified low-level zip internals risked producing corrupt
+  archives, so it's staying on the roadmap until it can be tested for real
+  rather than guessed at.
+
+## v0.1.5
+
+- Rebuilt `LICENSE` as proprietary (was MIT) — download-and-run only, no
+  redistribution or reuse rights granted; see the file for exact terms.
+- Rebuilt `README.md`: removed build/install instructions and version
+  history, added a top banner image, moved release notes here.
+- Added `PRIVACY.md`, `TERMS.md`, `THIRD-PARTY-NOTICES.md`.
+- Fixed two WCAG contrast failures: `.hint` text and PIN status messages
+  were at 2.93:1 against the background (fails AA's 4.5:1 minimum) — moved
+  to the `--muted` token, 5.36:1, passes.
+- In-app right-click menu rebuilt using Xuro's actual `ContextMenu.tsx`
+  mechanics (portal, viewport-edge clamping, roving keyboard focus,
+  danger-item styling) instead of a static CSS list, plus lucide icons per
+  item and an entrance animation.
+- Language dropdown: fixed a background-color mismatch (`--sunken` instead
+  of `--panel`, made it visibly darker than the toolbar it sits next to)
+  and standardized its border-radius/transition tokens to match the rest
+  of the app's chrome.
+- Explorer context-menu registration: rewrote the reg-write path to spawn
+  zero processes (`winreg` crate, direct Win32 registry calls) instead of
+  shelling out to `reg.exe` ~40 times per launch — fixes both the startup
+  freeze and the console-window flash reported on v0.1.3.
+- "Compress and email..." no longer flashes a console either — replaced
+  `tauri-plugin-shell`'s `open()` (shells through `cmd /C start` on
+  Windows) with a dedicated `reveal_in_file_manager` command that spawns
+  `explorer.exe` directly with `CREATE_NO_WINDOW`.
+
+## v0.1.4
+
+- Rebrand: Zarc → Tugur.
+- New app icon/logo throughout (taskbar, window, installer, file
+  associations), generated from the provided logo artwork.
+- Custom-branded NSIS installer: `setup.exe` uses the new icon, plus a
+  header/sidebar image built from the same logo.
+
+## v0.1.3
+
+- Password prompt when opening — encrypted `.init` and ZIP archives
+  authenticate before their contents are displayed, with retry support.
+- Windows Explorer registration moved to run at app startup (HKCU) in
+  addition to the NSIS installer's entries, so context-menu actions work
+  for unpacked/dev builds too.
+- In-app context menus — right-click an archive entry or empty archive
+  area to add files, open an archive, extract, test, select all, or clear
+  the current selection.
+- Native `.init` archives — a ZIP-compatible container with Syncinit's own
+  branding, AES-256 password support, and archive comments, while staying
+  interoperable with plain ZIP tools.
+- Explorer multi-select actions — select one or many files/folders and use
+  Syncinit → Add to archive..., Add to .init archive, or Compress and email....
+- Archive file integration — `.init` files open with Syncinit and expose
+  Extract Here / Open with Syncinit in Explorer; ZIP and 7z keep the same
+  actions.
+- Smart store — already-compressed formats (JPEG, PNG, MP4, PDF, ZIP, 7z,
+  etc.) are stored rather than wastefully recompressed.
+- Faster, safer archive creation — buffered I/O, atomic temporary output,
+  and ZIP path-traversal protection during extraction.
+- Archive comments are now actually written into the archive, not just
+  held in the UI.
+- Delete-after-archiving implemented with an explicit confirmation and a
+  safety check that refuses to delete a source directory containing the
+  new archive.
+
+## v0.1.1
+
+- Windows Explorer right-click context menu (Add to archive.../Add to
+  "name".zip/Compress and email...), registered via an NSIS installer
+  hook.
+- "Archive name and parameters" dialog (General/Advanced/Options/Comment
+  tabs), matching WinRAR's own dialog structure.
+- CLI launch-action parsing so the context-menu commands actually drive
+  the app (`--add`, `--add-default`, `--add-mail`, `--extract-here`).
+- First UI pass matching Xuro's design tokens and motion curve.
+
+## v0.1.0
+
+- Initial scaffold: Rust/Tauri v2 backend with zip/tar/7z list, create,
+  extract, and test support; React/TypeScript frontend with a WinRAR-style
+  toolbar and entry table; English-only i18n groundwork with the rest of
+  the locale list stubbed in for later.

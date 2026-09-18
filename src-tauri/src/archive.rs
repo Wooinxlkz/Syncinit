@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -22,14 +23,41 @@ pub enum ArchiveError {
     IntegrityFailed(String),
     #[error("refusing to delete a source that contains the output archive")]
     UnsafeDelete,
+    #[error("cancelled")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, ArchiveError>;
 
+/// Progress + cancellation, threaded through every create/extract call.
+/// `on_progress(done_bytes, total_bytes)` fires periodically; `cancelled`
+/// is polled between chunks and turns into `ArchiveError::Cancelled` the
+/// moment it flips true, so "Cancel" in the UI stops the operation instead
+/// of just hiding a spinner that keeps running underneath.
+pub struct ProgressCtx<'a> {
+    pub on_progress: Option<&'a dyn Fn(u64, u64)>,
+    pub cancelled: Option<&'a AtomicBool>,
+}
+
+impl<'a> ProgressCtx<'a> {
+    pub fn none() -> Self {
+        Self { on_progress: None, cancelled: None }
+    }
+    fn tick(&self, done: u64, total: u64) -> Result<()> {
+        if let Some(cb) = self.on_progress {
+            cb(done, total);
+        }
+        if self.cancelled.is_some_and(|c| c.load(Ordering::Relaxed)) {
+            return Err(ArchiveError::Cancelled);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Format {
-    Arc,
+    Init,
     Zip,
     Tar,
     TarGz,
@@ -54,8 +82,8 @@ impl Format {
             Some(Format::Tar)
         } else if name.ends_with(".7z") {
             Some(Format::SevenZ)
-        } else if name.ends_with(".arc") {
-            Some(Format::Arc)
+        } else if name.ends_with(".init") {
+            Some(Format::Init)
         } else if name.ends_with(".zip") {
             Some(Format::Zip)
         } else {
@@ -63,11 +91,11 @@ impl Format {
         }
     }
 
-    /// Formats Tugur can write natively. Other formats are read/extract-only.
+    /// Formats Syncinit can write natively. Other formats are read/extract-only.
     pub fn is_writable(&self) -> bool {
         matches!(
             self,
-            Format::Arc | Format::Zip | Format::Tar | Format::TarGz | Format::TarZst
+            Format::Init | Format::Zip | Format::Tar | Format::TarGz | Format::TarZst
         )
     }
 }
@@ -118,7 +146,7 @@ pub fn list_archive(path: &str, password: Option<&str>) -> Result<ArchiveSummary
         .ok_or_else(|| ArchiveError::UnsupportedFormat(path.display().to_string()))?;
 
     match format {
-        Format::Arc => list_zip(path, Format::Arc, password),
+        Format::Init => list_zip(path, Format::Init, password),
         Format::Zip => list_zip(path, Format::Zip, password),
         Format::Tar | Format::TarGz | Format::TarXz | Format::TarZst | Format::TarBz2 => {
             list_tar(path, format)
@@ -178,7 +206,7 @@ fn list_zip(path: &Path, format: Format, password: Option<&str>) -> Result<Archi
 
 /// Listing raw ZIP metadata does not authenticate an encrypted archive. Do a
 /// complete authenticated read before showing its contents so opening an
-/// encrypted .arc/.zip always requires the password.
+/// encrypted .init/.zip always requires the password.
 fn verify_zip_password(path: &Path, password: Option<&str>) -> Result<()> {
     let file = File::open(path)?;
     let mut zip = zip::ZipArchive::new(BufReader::new(file))?;
@@ -283,7 +311,7 @@ fn list_7z(path: &Path) -> Result<ArchiveSummary> {
 }
 
 /// Create a new archive from a set of source files/directories.
-pub fn create_archive(opts: &CreateOptions) -> Result<()> {
+pub fn create_archive(opts: &CreateOptions, ctx: &ProgressCtx) -> Result<()> {
     if !opts.format.is_writable() {
         return Err(ArchiveError::UnsupportedFormat(format!(
             "{:?} writing not implemented yet",
@@ -292,10 +320,10 @@ pub fn create_archive(opts: &CreateOptions) -> Result<()> {
     }
 
     match opts.format {
-        Format::Arc | Format::Zip => create_zip(opts),
-        Format::Tar => create_tar(opts, None),
-        Format::TarGz => create_tar(opts, Some(CompressorKind::Gzip)),
-        Format::TarZst => create_tar(opts, Some(CompressorKind::Zstd)),
+        Format::Init | Format::Zip => create_zip(opts, ctx),
+        Format::Tar => create_tar(opts, None, ctx),
+        Format::TarGz => create_tar(opts, Some(CompressorKind::Gzip), ctx),
+        Format::TarZst => create_tar(opts, Some(CompressorKind::Zstd), ctx),
         _ => unreachable!(),
     }
 }
@@ -305,17 +333,80 @@ enum CompressorKind {
     Zstd,
 }
 
-fn create_zip(opts: &CreateOptions) -> Result<()> {
+/// Total bytes across all sources, for progress denominators. Cheap
+/// metadata-only walk, no file contents touched.
+fn estimate_total_bytes(sources: &[String]) -> u64 {
+    let mut total = 0u64;
+    for src in sources {
+        let src_path = PathBuf::from(src);
+        if src_path.is_dir() {
+            for entry in walkdir::WalkDir::new(&src_path).into_iter().filter_map(|e| e.ok()) {
+                if entry.file_type().is_file() {
+                    total += entry.metadata().map(|m| m.len()).unwrap_or(0);
+                }
+            }
+        } else if let Ok(meta) = std::fs::metadata(&src_path) {
+            total += meta.len();
+        }
+    }
+    total.max(1)
+}
+
+/// `io::copy`, but reporting cumulative progress and checking for
+/// cancellation every 64 KiB instead of only at file boundaries — so a
+/// single large file still gives responsive progress/cancel, not just
+/// many small ones.
+fn copy_with_progress<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    done_so_far: u64,
+    total: u64,
+    ctx: &ProgressCtx,
+) -> Result<u64> {
+    let mut buf = [0u8; 64 * 1024];
+    let mut copied = 0u64;
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        writer.write_all(&buf[..n])?;
+        copied += n as u64;
+        ctx.tick(done_so_far + copied, total)?;
+    }
+    Ok(copied)
+}
+
+fn create_zip(opts: &CreateOptions, ctx: &ProgressCtx) -> Result<()> {
     let destination = Path::new(&opts.destination);
     let temp_path = destination.with_extension(format!(
-        "{}.tugur-part-{}",
+        "{}.syncinit-part-{}",
         destination
             .extension()
             .and_then(|e| e.to_str())
-            .unwrap_or("arc"),
+            .unwrap_or("init"),
         std::process::id()
     ));
-    let file = BufWriter::new(File::create(&temp_path)?);
+
+    let result = create_zip_into(opts, ctx, destination, &temp_path);
+    if result.is_err() {
+        // Cancelled or failed partway through — don't leave a half-written
+        // temp file sitting next to the destination.
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    result
+}
+
+fn create_zip_into(
+    opts: &CreateOptions,
+    ctx: &ProgressCtx,
+    destination: &Path,
+    temp_path: &Path,
+) -> Result<()> {
+    let total = estimate_total_bytes(&opts.sources);
+    let mut done = 0u64;
+
+    let file = BufWriter::new(File::create(temp_path)?);
     let mut writer = zip::ZipWriter::new(file);
 
     if let Some(comment) = opts
@@ -354,13 +445,13 @@ fn create_zip(opts: &CreateOptions) -> Result<()> {
                 } else {
                     writer.start_file(zip_path, zip_options(opts, should_store(path, opts)))?;
                     let mut f = BufReader::with_capacity(128 * 1024, File::open(path)?);
-                    std::io::copy(&mut f, &mut writer)?;
+                    done += copy_with_progress(&mut f, &mut writer, done, total, ctx)?;
                 }
             }
         } else {
             writer.start_file(base_name, zip_options(opts, should_store(&src_path, opts)))?;
             let mut f = BufReader::with_capacity(128 * 1024, File::open(&src_path)?);
-            std::io::copy(&mut f, &mut writer)?;
+            done += copy_with_progress(&mut f, &mut writer, done, total, ctx)?;
         }
     }
 
@@ -372,7 +463,7 @@ fn create_zip(opts: &CreateOptions) -> Result<()> {
     if destination.exists() {
         std::fs::remove_file(destination)?;
     }
-    std::fs::rename(&temp_path, destination)?;
+    std::fs::rename(temp_path, destination)?;
     Ok(())
 }
 
@@ -386,7 +477,7 @@ fn should_store(path: &Path, opts: &CreateOptions) -> bool {
             .map(|extension| extension.to_ascii_lowercase())
             .as_deref(),
         Some(
-            "7z" | "arc"
+            "7z" | "init"
                 | "avi"
                 | "bz2"
                 | "gz"
@@ -432,7 +523,10 @@ fn zip_options(opts: &CreateOptions, store: bool) -> zip::write::FileOptions<()>
     options
 }
 
-fn create_tar(opts: &CreateOptions, compressor: Option<CompressorKind>) -> Result<()> {
+fn create_tar(opts: &CreateOptions, compressor: Option<CompressorKind>, ctx: &ProgressCtx) -> Result<()> {
+    let total = estimate_total_bytes(&opts.sources);
+    let mut done = 0u64;
+
     let file = File::create(&opts.destination)?;
     let writer: Box<dyn Write> = match compressor {
         Some(CompressorKind::Gzip) => Box::new(flate2::write::GzEncoder::new(
@@ -440,7 +534,14 @@ fn create_tar(opts: &CreateOptions, compressor: Option<CompressorKind>) -> Resul
             flate2::Compression::new(opts.level.min(9) as u32),
         )),
         Some(CompressorKind::Zstd) => {
-            Box::new(zstd::stream::Encoder::new(file, opts.level.min(19) as i32)?.auto_finish())
+            let mut encoder = zstd::stream::Encoder::new(file, opts.level.min(19) as i32)?;
+            // Real multi-threaded compression, not a rayon-over-the-top
+            // approximation: libzstd's own worker-thread pool. Falls back
+            // to single-threaded silently if this build of zstd wasn't
+            // compiled with multithread support (the `zstdmt` feature) —
+            // still correct, just not faster, so this is safe either way.
+            let _ = encoder.multithread(num_cpus());
+            Box::new(encoder.auto_finish())
         }
         None => Box::new(file),
     };
@@ -454,10 +555,42 @@ fn create_tar(opts: &CreateOptions, compressor: Option<CompressorKind>) -> Resul
             .unwrap_or_default();
 
         if src_path.is_dir() {
-            tar_builder.append_dir_all(&base_name, &src_path)?;
+            for entry in walkdir::WalkDir::new(&src_path).into_iter().filter_map(|e| e.ok()) {
+                let path = entry.path();
+                let relative = path.strip_prefix(&src_path).unwrap_or(path);
+                let tar_path = if relative.as_os_str().is_empty() {
+                    format!("{base_name}/")
+                } else {
+                    format!("{base_name}/{}", relative.to_string_lossy().replace('\\', "/"))
+                };
+
+                if path.is_dir() {
+                    // Preserve empty directories too, same as the zip path's
+                    // add_directory call.
+                    tar_builder.append_dir(&tar_path, path)?;
+                    continue;
+                }
+
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let mut f = BufReader::with_capacity(128 * 1024, File::open(path)?);
+                let mut header = tar::Header::new_gnu();
+                header.set_size(size);
+                header.set_mode(0o644);
+                header.set_cksum();
+                // tar::Builder needs the exact byte count up front (it's in
+                // the header), so we can't stream progress through
+                // append_data's own writer the way the zip path does —
+                // tick once per file instead of mid-file.
+                tar_builder.append_data(&mut header, &tar_path, &mut f)?;
+                done += size;
+                ctx.tick(done, total)?;
+            }
         } else {
             let mut f = File::open(&src_path)?;
+            let size = f.metadata().map(|m| m.len()).unwrap_or(0);
             tar_builder.append_file(&base_name, &mut f)?;
+            done += size;
+            ctx.tick(done, total)?;
         }
     }
 
@@ -465,9 +598,13 @@ fn create_tar(opts: &CreateOptions, compressor: Option<CompressorKind>) -> Resul
     Ok(())
 }
 
+fn num_cpus() -> u32 {
+    std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(1)
+}
+
 /// Extract an archive to a destination directory. Supports zip, tar variants,
 /// and 7z (read-only). Returns the number of entries extracted.
-pub fn extract_archive(path: &str, destination: &str, password: Option<&str>) -> Result<usize> {
+pub fn extract_archive(path: &str, destination: &str, password: Option<&str>, ctx: &ProgressCtx) -> Result<usize> {
     let path = Path::new(path);
     let dest = Path::new(destination);
     std::fs::create_dir_all(dest)?;
@@ -476,18 +613,23 @@ pub fn extract_archive(path: &str, destination: &str, password: Option<&str>) ->
         .ok_or_else(|| ArchiveError::UnsupportedFormat(path.display().to_string()))?;
 
     match format {
-        Format::Arc | Format::Zip => extract_zip(path, dest, password),
+        Format::Init | Format::Zip => extract_zip(path, dest, password, ctx),
         Format::Tar | Format::TarGz | Format::TarXz | Format::TarZst | Format::TarBz2 => {
-            extract_tar(path, dest, format)
+            extract_tar(path, dest, format, ctx)
         }
         Format::SevenZ => extract_7z(path, dest, password),
     }
 }
 
-fn extract_zip(path: &Path, dest: &Path, password: Option<&str>) -> Result<usize> {
+fn extract_zip(path: &Path, dest: &Path, password: Option<&str>, ctx: &ProgressCtx) -> Result<usize> {
     let file = File::open(path)?;
     let mut zip = zip::ZipArchive::new(BufReader::new(file))?;
     let mut count = 0;
+    let total: u64 = (0..zip.len())
+        .filter_map(|i| zip.by_index_raw(i).ok().map(|e| e.size()))
+        .sum::<u64>()
+        .max(1);
+    let mut done = 0u64;
 
     for i in 0..zip.len() {
         let mut entry = if let Some(pw) = password {
@@ -512,7 +654,7 @@ fn extract_zip(path: &Path, dest: &Path, password: Option<&str>) -> Result<usize
                 std::fs::create_dir_all(parent)?;
             }
             let mut out_file = File::create(&out_path)?;
-            std::io::copy(&mut entry, &mut out_file)?;
+            done += copy_with_progress(&mut entry, &mut out_file, done, total, ctx)?;
             count += 1;
         }
     }
@@ -535,7 +677,8 @@ fn safe_archive_path(destination: &Path, name: &str) -> Result<PathBuf> {
     Ok(destination.join(relative))
 }
 
-fn extract_tar(path: &Path, dest: &Path, format: Format) -> Result<usize> {
+fn extract_tar(path: &Path, dest: &Path, format: Format, ctx: &ProgressCtx) -> Result<usize> {
+    let total = std::fs::metadata(path)?.len().max(1);
     let file = File::open(path)?;
     let reader: Box<dyn Read> = match format {
         Format::TarGz => Box::new(flate2::read::GzDecoder::new(file)),
@@ -546,11 +689,18 @@ fn extract_tar(path: &Path, dest: &Path, format: Format) -> Result<usize> {
         _ => unreachable!(),
     };
     let mut archive = tar::Archive::new(reader);
-    archive.unpack(dest)?;
-    let count = tar::Archive::new(File::open(path).map(|f| f)?)
-        .entries()?
-        .count();
-    Ok(count)
+    let mut count = 0u64;
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        entry.unpack_in(dest)?;
+        count += 1;
+        // tar entries stream from a compressed reader, so per-byte progress
+        // against compressed file size isn't meaningful — tick coarsely
+        // per-entry instead (still real cancel responsiveness, since
+        // ctx.tick still checks the cancel flag every entry).
+        ctx.tick(count.min(total), total)?;
+    }
+    Ok(count as usize)
 }
 
 fn extract_7z(path: &Path, dest: &Path, password: Option<&str>) -> Result<usize> {
@@ -569,7 +719,7 @@ pub fn test_archive(path: &str) -> Result<bool> {
     let format = Format::from_path(path)
         .ok_or_else(|| ArchiveError::UnsupportedFormat(path.display().to_string()))?;
 
-    if !matches!(format, Format::Arc | Format::Zip) {
+    if !matches!(format, Format::Init | Format::Zip) {
         // Non-zip formats: fall back to a full-read sanity check.
         list_archive(path.to_str().unwrap(), None)?;
         return Ok(true);
@@ -600,6 +750,89 @@ pub fn test_archive(path: &str) -> Result<bool> {
         }
     }
     Ok(true)
+}
+
+/// Remove entries from an existing zip/.init archive by rebuilding it
+/// without them. Deliberately uses the same decompress-then-recompress
+/// path as everywhere else in this file (open each surviving entry, read
+/// its plain bytes, write it back through the normal `start_file` API)
+/// rather than a raw-copy of the original compressed bytes — raw-copying
+/// is faster but needs a lower-level zip-crate API this project hasn't
+/// verified compiles correctly without a working `cargo build` on hand,
+/// and getting that wrong risks a corrupt archive. This is slower for
+/// large files but uses only patterns already proven elsewhere in this
+/// codebase.
+pub fn delete_entries(path: &str, names: &[String], ctx: &ProgressCtx) -> Result<usize> {
+    let format = Format::from_path(Path::new(path))
+        .ok_or_else(|| ArchiveError::UnsupportedFormat(path.to_string()))?;
+    if !matches!(format, Format::Init | Format::Zip) {
+        return Err(ArchiveError::UnsupportedFormat(
+            "deleting entries is only supported for .init/.zip archives".to_string(),
+        ));
+    }
+
+    let names_to_remove: std::collections::HashSet<&str> =
+        names.iter().map(|n| n.as_str()).collect();
+
+    let temp_path = PathBuf::from(format!("{path}.syncinit-part-{}", std::process::id()));
+    let result = delete_entries_into(path, &names_to_remove, ctx, &temp_path);
+    match result {
+        Ok(count) => {
+            std::fs::remove_file(path)?;
+            std::fs::rename(&temp_path, path)?;
+            Ok(count)
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp_path);
+            Err(e)
+        }
+    }
+}
+
+fn delete_entries_into(
+    path: &str,
+    names_to_remove: &std::collections::HashSet<&str>,
+    ctx: &ProgressCtx,
+    temp_path: &Path,
+) -> Result<usize> {
+    let src_file = File::open(path)?;
+    let mut reader = zip::ZipArchive::new(BufReader::new(src_file))?;
+
+    let out_file = BufWriter::new(File::create(temp_path)?);
+    let mut writer = zip::ZipWriter::new(out_file);
+    if !reader.comment().is_empty() {
+        writer.set_comment(String::from_utf8_lossy(reader.comment()).into_owned());
+    }
+
+    let total = reader.len() as u64;
+    let mut removed = 0usize;
+
+    for i in 0..reader.len() {
+        ctx.tick(i as u64, total.max(1))?;
+        let mut entry = reader.by_index(i)?;
+        if names_to_remove.contains(entry.name()) {
+            removed += 1;
+            continue;
+        }
+
+        let options: zip::write::FileOptions<()> = zip::write::FileOptions::default()
+            .compression_method(entry.compression())
+            .unix_permissions(entry.unix_mode().unwrap_or(0o644));
+
+        if entry.is_dir() {
+            writer.add_directory(entry.name().to_string(), options)?;
+        } else {
+            writer.start_file(entry.name().to_string(), options)?;
+            std::io::copy(&mut entry, &mut writer)?;
+        }
+    }
+
+    writer
+        .finish()?
+        .into_inner()
+        .map_err(|e| e.into_error())?
+        .flush()?;
+    Ok(removed)
 }
 
 /// Delete the original inputs only after an archive has been created and the

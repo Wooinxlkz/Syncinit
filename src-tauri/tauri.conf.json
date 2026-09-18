@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Tugur",
-  "version": "0.1.4",
-  "identifier": "com.tugur.archiver",
+  "productName": "Syncinit",
+  "version": "0.1.7",
+  "identifier": "com.syncinit.archiver",
   "build": {
     "beforeDevCommand": "bun run dev",
     "beforeBuildCommand": "bun run build",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Tugur",
+        "title": "Syncinit",
         "width": 900,
         "height": 600,
         "minWidth": 640,
@@ -50,17 +50,17 @@
       {
         "ext": ["zip"],
         "name": "Zip Archive",
-        "description": "Zip archive, opened with Tugur"
+        "description": "Zip archive, opened with Syncinit"
       },
       {
-        "ext": ["arc"],
-        "name": "Tugur Archive",
-        "description": "Tugur archive, opened with Tugur"
+        "ext": ["init"],
+        "name": "Syncinit Archive",
+        "description": "Syncinit archive, opened with Syncinit"
       },
       {
         "ext": ["7z"],
         "name": "7-Zip Archive",
-        "description": "7z archive, opened with Tugur"
+        "description": "7z archive, opened with Syncinit"
       }
     ]
   }

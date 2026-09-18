@@ -1,5 +1,5 @@
-/* Design tokens copied 1:1 from Xuro (src/styles.css .dark block) so Tugur's
-   palette and feel match it exactly. Tugur is dark-only for now, so these are
+/* Design tokens copied 1:1 from Xuro (src/styles.css .dark block) so Syncinit's
+   palette and feel match it exactly. Syncinit is dark-only for now, so these are
    just set on :root rather than split into a light/.dark pair — copy Xuro's
    :root block here too if a light theme gets added later. */
 :root {
@@ -353,7 +353,7 @@ tbody tr.selected {
   font-size: 11.5px;
 }
 .hint {
-  color: var(--faint);
+  color: var(--muted);
   font-size: 11px;
   line-height: 1.5;
   margin: 0;
@@ -512,14 +512,14 @@ tbody tr.selected {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: var(--sunken, #0f0f0f);
+  background: var(--panel, #151515);
   color: var(--ink, #ebebe8);
   border: 1px solid var(--line, #292927);
-  border-radius: 6px;
+  border-radius: var(--radius-sm, 6px);
   padding: 3px 8px;
   font-size: 12px;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s var(--ease-out, ease), background 0.15s var(--ease-out, ease);
 }
 .locale-trigger:hover {
   background: var(--hover);
@@ -573,4 +573,180 @@ tbody tr.selected {
 .locale-option-soon {
   font-size: 10px;
   color: var(--faint, #64645f);
+}
+
+/* ---- In-app right-click menu (ContextMenu.tsx, ported from Xuro) ---- */
+.ctx-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 190px;
+  border-radius: var(--radius, 8px);
+  border: 1px solid var(--line, #292927);
+  background: var(--bg, #1a1a1a);
+  padding: 4px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.ctx-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--ink, #ebebe8);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s var(--ease-out, ease);
+}
+.ctx-menu-item:hover:not(:disabled) {
+  background: var(--hover);
+}
+.ctx-menu-item:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+.ctx-menu-item:disabled {
+  color: var(--faint, #64645f);
+  cursor: default;
+}
+.ctx-menu-item-danger {
+  color: var(--danger, #ff5c5c);
+}
+.ctx-menu-item-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger, #ff5c5c) 12%, transparent);
+}
+
+.cancel-btn {
+  background: transparent;
+  border: 1px solid var(--danger, #ff5c5c);
+  color: var(--danger, #ff5c5c);
+  border-radius: var(--radius-sm, 6px);
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s var(--ease-out, ease);
+}
+.cancel-btn:hover {
+  background: color-mix(in srgb, var(--danger, #ff5c5c) 12%, transparent);
+}
+
+/* ---- Top menu bar (File/Commands/Favorites/Options/Tools/Help) ---- */
+.menubar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: var(--panel, #151515);
+  border-bottom: 1px solid var(--line, #292927);
+  -webkit-app-region: drag;
+}
+.menubar-item {
+  -webkit-app-region: no-drag;
+  background: transparent;
+  border: none;
+  color: var(--muted, #9aa0a6);
+  font-size: 12px;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  transition: background 0.1s var(--ease-out, ease), color 0.1s var(--ease-out, ease);
+}
+.menubar-item:hover,
+.menubar-item.active {
+  background: var(--hover);
+  color: var(--ink, #ebebe8);
+}
+
+/* ---- Icon toolbar ---- */
+.icon-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--bg, #1a1a1a);
+  border-bottom: 1px solid var(--line, #292927);
+  flex-wrap: wrap;
+}
+.icon-toolbar-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 52px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius, 8px);
+  padding: 5px 8px 4px;
+  color: var(--ink, #ebebe8);
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 0.12s var(--ease-out, ease), border-color 0.12s var(--ease-out, ease),
+    transform 0.1s var(--ease-out, ease);
+}
+.icon-toolbar-btn:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--line, #292927);
+}
+.icon-toolbar-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+.icon-toolbar-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.icon-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 4px;
+  background: var(--line, #292927);
+}
+.icon-toolbar-btn.danger {
+  color: var(--danger, #ff5c5c);
+}
+
+/* ---- Find bar ---- */
+.find-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--bg, #1a1a1a);
+  border-bottom: 1px solid var(--line-soft, #202020);
+}
+.find-bar input {
+  flex: 1;
+  background: var(--sunken, #0f0f0f);
+  border: 1px solid var(--line, #292927);
+  border-radius: var(--radius-sm, 6px);
+  padding: 5px 9px;
+  color: var(--ink, #ebebe8);
+  font-size: 12.5px;
+}
+.find-bar input:focus {
+  outline: none;
+  border-color: var(--faint, #64645f);
+}
+
+/* ---- Info / About modals ---- */
+.info-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  font-size: 12.5px;
+}
+.info-grid dt {
+  color: var(--muted, #9aa0a6);
+}
+.info-grid dd {
+  margin: 0;
+  color: var(--ink, #ebebe8);
+}
+.about-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  margin-bottom: 8px;
 }

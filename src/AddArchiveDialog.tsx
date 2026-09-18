@@ -89,14 +89,14 @@ export default function AddArchiveDialog({ defaultName, onCancel, onConfirm }: P
               <div className="field-row">
                 <fieldset className="fieldset">
                   <legend>Archive format</legend>
-                  {(["arc", "zip", "tar", "targz", "tarzst"] as Format[]).map((f) => (
+                  {(["init", "zip", "tar", "targz", "tarzst"] as Format[]).map((f) => (
                     <label key={f} className="radio">
                       <input
                         type="radio"
                         checked={format === f}
                         onChange={() => setFormat(f)}
                       />
-                      {f === "arc" ? "TUGUR (.ARC)" : f.toUpperCase()}
+                      {f === "init" ? "SYNCINIT (.INIT)" : f.toUpperCase()}
                     </label>
                   ))}
                 </fieldset>

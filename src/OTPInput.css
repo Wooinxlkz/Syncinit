@@ -96,7 +96,7 @@
 .otp-message {
   margin: 0;
   font-size: 11px;
-  color: var(--faint, #64645f);
+  color: var(--muted, #9aa0a6);
 }
 .otp-message-error {
   color: var(--danger, #ff5c5c);

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type Format = "arc" | "zip" | "tar" | "targz" | "tarxz" | "tarzst" | "tarbz2" | "sevenz";
+export type Format = "init" | "zip" | "tar" | "targz" | "tarxz" | "tarzst" | "tarbz2" | "sevenz";
 
 export interface ArchiveEntry {
   name: string;
@@ -36,9 +36,11 @@ export const api = {
   createArchive: (options: CreateOptions) => invoke<void>("create_archive", { options }),
   deleteSources: (sources: string[], destination: string) =>
     invoke<number>("delete_sources", { sources, destination }),
+  deleteEntries: (path: string, names: string[]) => invoke<number>("delete_entries", { path, names }),
   extractArchive: (path: string, destination: string, password?: string) =>
     invoke<number>("extract_archive", { path, destination, password: password ?? null }),
   testArchive: (path: string) => invoke<boolean>("test_archive", { path }),
+  cancelOperation: () => invoke<void>("cancel_operation"),
   detectFormat: (path: string) => invoke<string | null>("detect_format", { path }),
 };
 

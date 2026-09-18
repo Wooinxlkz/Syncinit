@@ -1,11 +1,37 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
 // (no plugin-shell import — reveal_in_file_manager on the Rust side avoids
 // the console-flash the shell plugin's open() causes on Windows)
 import { api, formatBytes, type ArchiveSummary } from "./api";
-import { useI18n } from "./i18n";
+import { useI18n, SUPPORTED_LOCALES } from "./i18n";
 import { LocaleDropdown } from "./LocaleDropdown";
+import { MenuBar } from "./MenuBar";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { ContextMenu, type MenuItem } from "./ContextMenu";
+import {
+  FolderInput,
+  FolderOpen,
+  ListChecks,
+  Package,
+  SquareCheck,
+  SquareX,
+  TestTubeDiagonal,
+  X,
+  Plus,
+  FolderOutput,
+  FlaskConical,
+  Trash2,
+  Search,
+  Info,
+  MessageSquare,
+  HelpCircle,
+  Star,
+  Settings,
+  Wrench,
+  FileArchive,
+} from "lucide-react";
 import AddArchiveDialog, { type ArchiveDialogResult } from "./AddArchiveDialog";
 import PasswordDialog from "./PasswordDialog";
 import "./App.css";
@@ -42,8 +68,8 @@ function basename(p: string) {
 }
 
 function archiveExtension(format: ArchiveDialogResult["format"]) {
-  return format === "arc"
-    ? ".arc"
+  return format === "init"
+    ? ".init"
     : format === "targz"
       ? ".tar.gz"
       : format === "tarxz"
@@ -67,6 +93,10 @@ function isPasswordError(error: unknown) {
   return message.includes("password") || message.includes("encrypted");
 }
 
+function isCancelledError(error: unknown) {
+  return String(error).toLowerCase().includes("cancelled");
+}
+
 export default function App() {
   const { t, locale, setLocale } = useI18n();
   const [archivePath, setArchivePath] = useState<string | null>(null);
@@ -74,19 +104,44 @@ export default function App() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [dialogSources, setDialogSources] = useState<string[] | null>(null);
   const [passwordRequest, setPasswordRequest] = useState<PasswordRequest | null>(null);
   const [passwordError, setPasswordError] = useState("");
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [filterText, setFilterText] = useState("");
+  const [findOpen, setFindOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [favorites, setFavorites] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("syncinit:favorites") ?? "[]");
+    } catch {
+      return [];
+    }
+  });
 
-  // Pick up context-menu launches: "Add to archive...", "Add to X.arc",
+  useEffect(() => {
+    const unlisten = listen<{ done: number; total: number }>("syncinit://progress", (event) => {
+      setProgress(event.payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Pick up context-menu launches: "Add to archive...", "Add to X.init",
   // "Compress and email...", "Extract Here", or a double-clicked archive.
   useEffect(() => {
     // Register in HKCU as well as the installer HKCR entries. This makes the
     // Explorer menu work when running a development build or an unpacked exe.
-    invoke<boolean>("register_context_menu").catch((err) =>
-      console.warn("Context menu registration failed:", err)
-    );
+    invoke<boolean>("register_context_menu")
+      .catch((err) => console.warn("Context menu registration failed:", err))
+      .finally(() => {
+        invoke("debug_context_menu").then((info) =>
+          console.log("Syncinit context menu registry state:", info)
+        );
+      });
     const closeMenu = () => setContextMenu(null);
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setContextMenu(null);
@@ -101,8 +156,8 @@ export default function App() {
           setDialogSources(action.paths);
         } else if (action.mode === "add-default") {
           await runCreate(action.paths, {
-            name: `${basename(action.paths[0])}.arc`,
-            format: "arc",
+            name: `${basename(action.paths[0])}.init`,
+            format: "init",
             level: 6,
             password: "",
             deleteAfter: false,
@@ -112,8 +167,8 @@ export default function App() {
           });
         } else if (action.mode === "add-and-mail") {
           const dest = await runCreate(action.paths, {
-            name: `${basename(action.paths[0])}.arc`,
-            format: "arc",
+            name: `${basename(action.paths[0])}.init`,
+            format: "init",
             level: 6,
             password: "",
             deleteAfter: false,
@@ -151,6 +206,11 @@ export default function App() {
       setStatus(
         t("status.entries", { count: data.entries.length, size: formatBytes(data.total_uncompressed) })
       );
+      setFavorites((prev) => {
+        const next = [path, ...prev.filter((p) => p !== path)].slice(0, 8);
+        localStorage.setItem("syncinit:favorites", JSON.stringify(next));
+        return next;
+      });
     } catch (err) {
       if (isPasswordError(err)) {
         setPasswordRequest({ path, purpose: "open" });
@@ -166,7 +226,7 @@ export default function App() {
   async function openArchive() {
     const file = await open({
       multiple: false,
-      filters: [{ name: "Archives", extensions: ["arc", "zip", "7z", "tar", "gz", "tgz", "xz", "zst", "bz2"] }],
+      filters: [{ name: "Archives", extensions: ["init", "zip", "7z", "tar", "gz", "tgz", "xz", "zst", "bz2"] }],
     });
     if (file) await loadArchive(file as string);
   }
@@ -177,6 +237,7 @@ export default function App() {
       destination = `${dirname(sources[0])}/${destination}`;
     }
     setBusy(true);
+    setProgress(null);
     try {
       await api.createArchive({
         destination,
@@ -191,7 +252,7 @@ export default function App() {
       if (result.deleteAfter) {
         const approved = await confirm(
           `Delete ${sources.length === 1 ? "the original item" : `${sources.length} original items`} after the archive passes${result.testAfter ? " its test" : ""}? This cannot be undone.`,
-          { title: "Tugur — delete originals", kind: "warning" },
+          { title: "Syncinit — delete originals", kind: "warning" },
         );
         if (approved) {
           await api.deleteSources(sources, destination);
@@ -200,10 +261,11 @@ export default function App() {
       await loadArchive(destination);
       return destination;
     } catch (err) {
-      setStatus(String(err));
+      setStatus(isCancelledError(err) ? "Cancelled." : String(err));
       return null;
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -215,13 +277,16 @@ export default function App() {
 
   async function extractTo(source: string, destination: string, password?: string) {
     setBusy(true);
+    setProgress(null);
     try {
       const count = await api.extractArchive(source, destination, password);
       setPasswordRequest(null);
       setPasswordError("");
       setStatus(t("toast.extracted", { count, dest: destination }));
     } catch (err) {
-      if (isPasswordError(err)) {
+      if (isCancelledError(err)) {
+        setStatus("Cancelled.");
+      } else if (isPasswordError(err)) {
         setPasswordRequest({ path: source, purpose: "extract", destination });
         setPasswordError(password ? "Incorrect password. Try again." : "");
       } else {
@@ -229,6 +294,7 @@ export default function App() {
       }
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -261,6 +327,25 @@ export default function App() {
     }
   }
 
+  async function deleteSelectedEntries() {
+    if (!archivePath || selected.size === 0) return;
+    const names = Array.from(selected);
+    const approved = await confirm(
+      `Remove ${names.length === 1 ? `"${names[0]}"` : `${names.length} entries`} from the archive? This rebuilds the archive without them and cannot be undone.`,
+      { title: "Syncinit — delete from archive", kind: "warning" }
+    );
+    if (!approved) return;
+    setBusy(true);
+    try {
+      await api.deleteEntries(archivePath, names);
+      await loadArchive(archivePath);
+    } catch (err) {
+      setStatus(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function toggleSelect(name: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -284,6 +369,41 @@ export default function App() {
     setContextMenu(null);
   }
 
+  function buildMenuItems(menu: ContextMenuState): MenuItem[] {
+    const items: MenuItem[] = [];
+    if (menu.entry) {
+      items.push({
+        label: selected.has(menu.entry) ? "Unselect entry" : "Select entry",
+        icon: selected.has(menu.entry) ? SquareX : SquareCheck,
+        onSelect: () => toggleSelect(menu.entry!),
+      });
+    }
+    items.push({ label: "Add files to archive…", icon: Package, onSelect: addFilesViaDialog });
+    items.push({ label: "Open archive…", icon: FolderOpen, onSelect: openArchive });
+    items.push({
+      label: "Extract to…",
+      icon: FolderInput,
+      disabled: !archivePath,
+      onSelect: extractCurrent,
+    });
+    items.push({
+      label: "Test archive",
+      icon: TestTubeDiagonal,
+      disabled: !archivePath,
+      onSelect: testCurrent,
+    });
+    items.push({
+      label: "Select all entries",
+      icon: ListChecks,
+      disabled: !summary,
+      onSelect: selectAllEntries,
+    });
+    if (selected.size > 0) {
+      items.push({ label: "Clear selection", icon: X, danger: true, onSelect: () => setSelected(new Set()) });
+    }
+    return items;
+  }
+
   return (
     <div className="app" onContextMenu={showContextMenu}>
       <header className="titlebar">
@@ -291,22 +411,142 @@ export default function App() {
         <LocaleDropdown locale={locale} onChange={setLocale} />
       </header>
 
-      <div className="toolbar">
-        <button onClick={addFilesViaDialog} disabled={busy}>
+      <MenuBar
+        sections={[
+          {
+            label: "File",
+            items: [
+              { label: "Open archive…", icon: FolderOpen, onSelect: openArchive },
+              { label: "Add files…", icon: Plus, onSelect: addFilesViaDialog },
+              { label: "Exit", icon: X, onSelect: () => getCurrentWindow().close() },
+            ],
+          },
+          {
+            label: "Commands",
+            items: [
+              { label: "Add to archive…", icon: Package, onSelect: addFilesViaDialog },
+              { label: "Extract to…", icon: FolderOutput, disabled: !archivePath, onSelect: extractCurrent },
+              { label: "Test archive", icon: FlaskConical, disabled: !archivePath, onSelect: testCurrent },
+              {
+                label: "Delete from archive",
+                icon: Trash2,
+                danger: true,
+                disabled: !archivePath || selected.size === 0,
+                onSelect: deleteSelectedEntries,
+              },
+            ],
+          },
+          {
+            label: "Favorites",
+            items:
+              favorites.length > 0
+                ? favorites.map((fav) => ({
+                    label: basename(fav),
+                    icon: FileArchive,
+                    onSelect: () => loadArchive(fav),
+                  }))
+                : [{ label: "No recent archives yet", disabled: true, onSelect: () => {} }],
+          },
+          {
+            label: "Tools",
+            items: [
+              { label: "Find in archive", icon: Search, disabled: !summary, onSelect: () => setFindOpen((v) => !v) },
+              { label: "Archive info", icon: Info, disabled: !summary, onSelect: () => setInfoOpen(true) },
+              { label: "View comment", icon: MessageSquare, disabled: !summary?.comment, onSelect: () => setInfoOpen(true) },
+            ],
+          },
+          {
+            label: "Options",
+            items: SUPPORTED_LOCALES.filter((l) => l.ready).map((l) => ({
+              label: l.label,
+              disabled: l.code === locale,
+              onSelect: () => setLocale(l.code),
+            })),
+          },
+          {
+            label: "Help",
+            items: [{ label: "About Syncinit", icon: HelpCircle, onSelect: () => setAboutOpen(true) }],
+          },
+        ]}
+      />
+
+      <div className="icon-toolbar">
+        <button className="icon-toolbar-btn" onClick={addFilesViaDialog} disabled={busy}>
+          <Plus size={20} strokeWidth={1.75} />
           {t("toolbar.add")}
         </button>
-        <button onClick={openArchive} disabled={busy}>
-          Open
-        </button>
-        <button onClick={extractCurrent} disabled={busy || !archivePath}>
+        <button className="icon-toolbar-btn" onClick={extractCurrent} disabled={busy || !archivePath}>
+          <FolderOutput size={20} strokeWidth={1.75} />
           {t("toolbar.extract")}
         </button>
-        <button onClick={testCurrent} disabled={busy || !archivePath}>
+        <button className="icon-toolbar-btn" onClick={testCurrent} disabled={busy || !archivePath}>
+          <FlaskConical size={20} strokeWidth={1.75} />
           {t("toolbar.test")}
         </button>
-        <button disabled={busy || selected.size === 0}>{t("toolbar.delete")}</button>
+        <button
+          className="icon-toolbar-btn danger"
+          onClick={deleteSelectedEntries}
+          disabled={busy || !archivePath || selected.size === 0}
+        >
+          <Trash2 size={20} strokeWidth={1.75} />
+          {t("toolbar.delete")}
+        </button>
+        <div className="icon-toolbar-sep" />
+        <button
+          className="icon-toolbar-btn"
+          onClick={() => setFindOpen((v) => !v)}
+          disabled={busy || !summary}
+        >
+          <Search size={20} strokeWidth={1.75} />
+          Find
+        </button>
+        <button className="icon-toolbar-btn" onClick={() => setInfoOpen(true)} disabled={busy || !summary}>
+          <Info size={20} strokeWidth={1.75} />
+          Info
+        </button>
+        <button
+          className="icon-toolbar-btn"
+          onClick={() => setInfoOpen(true)}
+          disabled={busy || !summary?.comment}
+        >
+          <MessageSquare size={20} strokeWidth={1.75} />
+          Comment
+        </button>
+        <div className="icon-toolbar-sep" />
         {busy && <span className="spinner" aria-hidden />}
+        {busy && (
+          <button className="cancel-btn" onClick={() => api.cancelOperation()}>
+            Cancel
+          </button>
+        )}
       </div>
+
+      {findOpen && (
+        <div className="find-bar">
+          <Search size={14} strokeWidth={1.75} />
+          <input
+            autoFocus
+            placeholder="Find in archive…"
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+          />
+          <button className="icon-btn" onClick={() => { setFindOpen(false); setFilterText(""); }}>
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {busy && progress && progress.total > 0 && (
+        <div className="progress-row">
+          <div className="progress-bar-track">
+            <div
+              className="progress-bar-fill"
+              style={{ width: `${Math.min(100, (progress.done / progress.total) * 100)}%` }}
+            />
+          </div>
+          <span>{Math.min(100, Math.round((progress.done / progress.total) * 100))}%</span>
+        </div>
+      )}
 
       <div className="path-bar">{archivePath ?? t("status.noArchive")}</div>
 
@@ -323,7 +563,9 @@ export default function App() {
             </tr>
           </thead>
           <tbody>
-            {summary?.entries.map((entry, i) => {
+            {summary?.entries
+              .filter((entry) => entry.name.toLowerCase().includes(filterText.toLowerCase()))
+              .map((entry, i) => {
               const ratio = entry.size > 0 ? Math.round((1 - entry.compressed_size / entry.size) * 100) : 0;
               return (
                 <tr
@@ -353,33 +595,16 @@ export default function App() {
       </footer>
 
       {contextMenu && (
-        <div
-          className="context-menu"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onClick={(event) => event.stopPropagation()}
-          onContextMenu={(event) => event.preventDefault()}
-        >
-          {contextMenu.entry && (
-            <button onClick={() => { toggleSelect(contextMenu.entry!); setContextMenu(null); }}>
-              {selected.has(contextMenu.entry) ? "Unselect entry" : "Select entry"}
-            </button>
-          )}
-          <button onClick={addFilesViaDialog}>Add files to archive…</button>
-          <button onClick={openArchive}>Open archive…</button>
-          <button disabled={!archivePath} onClick={extractCurrent}>Extract to…</button>
-          <button disabled={!archivePath} onClick={testCurrent}>Test archive</button>
-          <button disabled={!summary} onClick={selectAllEntries}>Select all entries</button>
-          {selected.size > 0 && (
-            <button onClick={() => { setSelected(new Set()); setContextMenu(null); }}>
-              Clear selection
-            </button>
-          )}
-        </div>
+        <ContextMenu
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+          items={buildMenuItems(contextMenu)}
+        />
       )}
 
       {dialogSources && (
         <AddArchiveDialog
-           defaultName={`${basename(dialogSources[0]).replace(/\.[^/.]+$/, "")}.arc`}
+           defaultName={`${basename(dialogSources[0]).replace(/\.[^/.]+$/, "")}.init`}
           onCancel={() => setDialogSources(null)}
           onConfirm={async (result: ArchiveDialogResult) => {
             const sources = dialogSources;
@@ -400,6 +625,65 @@ export default function App() {
           onSubmit={submitPassword}
         />
       )}
+
+      {infoOpen && summary && (
+        <SimpleModal title="Archive info" onClose={() => setInfoOpen(false)}>
+          <dl className="info-grid">
+            <dt>Format</dt>
+            <dd>{summary.format.toUpperCase()}</dd>
+            <dt>Entries</dt>
+            <dd>{summary.entries.length}</dd>
+            <dt>Uncompressed</dt>
+            <dd>{formatBytes(summary.total_uncompressed)}</dd>
+            <dt>Compressed</dt>
+            <dd>{formatBytes(summary.total_compressed)}</dd>
+            <dt>Encrypted</dt>
+            <dd>{summary.encrypted ? "Yes (AES-256)" : "No"}</dd>
+            {summary.comment && (
+              <>
+                <dt>Comment</dt>
+                <dd>{summary.comment}</dd>
+              </>
+            )}
+          </dl>
+        </SimpleModal>
+      )}
+
+      {aboutOpen && (
+        <SimpleModal title="About Syncinit" onClose={() => setAboutOpen(false)}>
+          <p style={{ margin: "0 0 8px", color: "var(--muted)" }}>
+            A fast, modern archive manager for Windows — a practical WinRAR alternative.
+          </p>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--faint)" }}>
+            No telemetry, no network calls. See PRIVACY.md / TERMS.md / LICENSE in the install
+            folder for the full policies.
+          </p>
+        </SimpleModal>
+      )}
+    </div>
+  );
+}
+
+function SimpleModal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 360 }}>
+        <div className="modal-header">
+          <span>{title}</span>
+          <button className="icon-btn" onClick={onClose}>
+            <X size={14} />
+          </button>
+        </div>
+        <div className="modal-body">{children}</div>
+      </div>
     </div>
   );
 }

@@ -28,7 +28,7 @@ export const SUPPORTED_LOCALES = [
 
 type Dict = Record<string, string>;
 const cache = new Map<string, Dict>();
-const STORAGE_KEY = "tugur:locale";
+const STORAGE_KEY = "syncinit:locale";
 
 async function loadLocale(code: string): Promise<Dict> {
   if (cache.has(code)) return cache.get(code)!;
