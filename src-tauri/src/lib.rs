@@ -38,6 +38,40 @@ fn set_reg_value(path: &str, name: &str, data: &str) -> std::io::Result<()> {
     }
 }
 
+/// Deletes whatever shell-menu/registry trees earlier Syncinit builds left
+/// behind under the app's previous names ("Zarc", then "Tugur") before it
+/// settled on "Syncinit". Nothing in this codebase writes those names
+/// anymore, but an install that's been upgraded across the renames can
+/// still have them sitting in the registry — showing up as duplicate/stale
+/// "Zarc" or "Tugur" entries in the right-click menu (the "still named
+/// zarc" symptom) instead of a clean single "Syncinit" entry. Best-effort:
+/// every deletion is allowed to fail silently (key may simply not exist).
+#[cfg(windows)]
+fn cleanup_legacy_registrations() {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    for legacy in ["Zarc", "Tugur"] {
+        for root in ["Software\\Classes\\*", "Software\\Classes\\Directory"] {
+            let _ = hkcu.delete_subkey_all(&format!("{root}\\shell\\{legacy}"));
+        }
+        let _ = hkcu.delete_subkey_all(&format!(
+            "Software\\Classes\\Directory\\Background\\shell\\{legacy}"
+        ));
+        for extension in ["init", "zip", "7z"] {
+            let base = format!("Software\\Classes\\SystemFileAssociations\\.{extension}\\shell");
+            let _ = hkcu.delete_subkey_all(&format!("{base}\\{legacy}ExtractHere"));
+            let _ = hkcu.delete_subkey_all(&format!("{base}\\{legacy}Open"));
+        }
+        let _ = hkcu.delete_subkey_all(&format!("Software\\Classes\\{legacy}.Archive"));
+    }
+    // The old ".init" ProgID pointed at "Zarc.Archive"/"Tugur.Archive" before
+    // this rename; if HKCU\...\.init\ is still set to one of those (rather
+    // than "Syncinit.Archive"), Explorer's icon/open-with for .init files
+    // can still resolve through the dead ProgID. register_context_menu()
+    // rewrites it to "Syncinit.Archive" right after this call regardless.
+}
+
 #[tauri::command]
 fn register_context_menu() -> Result<bool, String> {
     #[cfg(not(windows))]
@@ -53,6 +87,8 @@ fn register_context_menu() -> Result<bool, String> {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let exe_str = exe.to_string_lossy().to_string();
         let exe_quoted = format!("\"{exe_str}\"");
+
+        cleanup_legacy_registrations();
 
         // Idempotency check: skip the ~40 registry writes below entirely if
         // they already point at this exact exe path (e.g. every app launch,
@@ -428,6 +464,23 @@ pub fn run() {
     let launch_action = parse_launch_action(&std::env::args().collect::<Vec<_>>());
 
     tauri::Builder::default()
+        // Must be the first plugin registered. When a second copy of
+        // Syncinit is launched (e.g. Explorer's "Add to archive…" while the
+        // app is already open), this hands the new instance's argv to the
+        // *existing* process via this callback and lets the new process
+        // exit — instead of a second full window opening (or racing the
+        // first one over the same files), which is what "Add to archive…
+        // doesn't work" looked like whenever the app was already running.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let action = parse_launch_action(&argv);
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+            if !matches!(action, LaunchAction::None) {
+                let _ = app.emit("syncinit://relaunch-action", action);
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())

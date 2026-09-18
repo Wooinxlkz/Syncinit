@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import AddArchiveDialog, { type ArchiveDialogResult } from "./AddArchiveDialog";
 import PasswordDialog from "./PasswordDialog";
+import { Modal } from "./Modal";
 import "./App.css";
 
 type LaunchAction =
@@ -113,6 +114,7 @@ export default function App() {
   const [findOpen, setFindOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const [favorites, setFavorites] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("syncinit:favorites") ?? "[]");
@@ -127,6 +129,46 @@ export default function App() {
     });
     return () => {
       unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // Native OS drag-and-drop, both directions:
+  //  - dragging files FROM outside the window (Explorer, desktop) onto it
+  //    opens the Add-to-archive dialog with the dropped paths, same as
+  //    "Add files…"/right-click "Add to archive…";
+  //  - dragging a row OUT of the window (onto Explorer) is handled by
+  //    ArchiveTable's own draggable rows using Tauri's startDrag, not here.
+  // This needs `dragDropEnabled: true` in tauri.conf.json — with it false,
+  // the webview swallows OS drag events entirely and neither this listener
+  // nor a plain HTML5 onDrop ever fires, which is why dropping did nothing.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    import("@tauri-apps/api/webview").then(({ getCurrentWebview }) => {
+      getCurrentWebview()
+        .onDragDropEvent((event) => {
+          const kind = event.payload.type;
+          if (kind === "enter" || kind === "over") {
+            setDragActive(true);
+          } else if (kind === "leave") {
+            setDragActive(false);
+          } else if (kind === "drop") {
+            setDragActive(false);
+            const paths = event.payload.paths;
+            if (paths && paths.length > 0) {
+              setDialogSources(paths);
+            }
+          }
+        })
+        .then((fn) => {
+          if (cancelled) fn();
+          else unlisten = fn;
+        })
+        .catch((err) => console.warn("Drag-and-drop listener failed to attach:", err));
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, []);
 
@@ -149,50 +191,65 @@ export default function App() {
     window.addEventListener("click", closeMenu);
     window.addEventListener("keydown", closeOnEscape);
 
-    invoke<LaunchAction>("get_launch_action").then(async (action) => {
-      if (!action || action.mode === "none") return;
-      try {
-        if (action.mode === "add-dialog") {
-          setDialogSources(action.paths);
-        } else if (action.mode === "add-default") {
-          await runCreate(action.paths, {
-            name: `${basename(action.paths[0])}.init`,
-            format: "init",
-            level: 6,
-            password: "",
-            deleteAfter: false,
-            testAfter: false,
-            comment: "",
-            smartStore: true,
-          });
-        } else if (action.mode === "add-and-mail") {
-          const dest = await runCreate(action.paths, {
-            name: `${basename(action.paths[0])}.init`,
-            format: "init",
-            level: 6,
-            password: "",
-            deleteAfter: false,
-            testAfter: false,
-            comment: "",
-            smartStore: true,
-          });
-          if (dest) await invoke("reveal_in_file_manager", { path: dirname(dest) });
-        } else if (action.mode === "extract-here") {
-          const src = action.paths[0];
-          await extractTo(src, dirname(src));
-        } else if (action.mode === "open-archive") {
-          await loadArchive(action.path);
-        }
-      } catch (err) {
-        setStatus(String(err));
-      }
+    invoke<LaunchAction>("get_launch_action").then((action) => {
+      if (action && action.mode !== "none") handleLaunchAction(action);
+    });
+    const unlistenRelaunch = listen<LaunchAction>("syncinit://relaunch-action", (event) => {
+      handleLaunchAction(event.payload);
     });
     return () => {
       window.removeEventListener("click", closeMenu);
       window.removeEventListener("keydown", closeOnEscape);
+      unlistenRelaunch.then((fn) => fn());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Shared by the initial launch action (get_launch_action, read once at
+  // startup) and by "syncinit://relaunch-action" — emitted by the Rust
+  // single-instance plugin handler when Explorer's "Add to archive…" /
+  // "Add to X.init" / etc. is invoked while Syncinit is *already* running.
+  // Without this, that second launch used to spawn a whole separate process
+  // instead of reusing the open window, which looked like the context menu
+  // command silently did nothing (the new window could open behind the
+  // existing one, or the two would race on the same files).
+  async function handleLaunchAction(action: LaunchAction) {
+    try {
+      if (action.mode === "add-dialog") {
+        setDialogSources(action.paths);
+      } else if (action.mode === "add-default") {
+        await runCreate(action.paths, {
+          name: `${basename(action.paths[0])}.init`,
+          format: "init",
+          level: 6,
+          password: "",
+          deleteAfter: false,
+          testAfter: false,
+          comment: "",
+          smartStore: true,
+        });
+      } else if (action.mode === "add-and-mail") {
+        const dest = await runCreate(action.paths, {
+          name: `${basename(action.paths[0])}.init`,
+          format: "init",
+          level: 6,
+          password: "",
+          deleteAfter: false,
+          testAfter: false,
+          comment: "",
+          smartStore: true,
+        });
+        if (dest) await invoke("reveal_in_file_manager", { path: dirname(dest) });
+      } else if (action.mode === "extract-here") {
+        const src = action.paths[0];
+        await extractTo(src, dirname(src));
+      } else if (action.mode === "open-archive") {
+        await loadArchive(action.path);
+      }
+    } catch (err) {
+      setStatus(String(err));
+    }
+  }
 
   async function loadArchive(path: string, password?: string) {
     setBusy(true);
@@ -602,32 +659,39 @@ export default function App() {
         />
       )}
 
-      {dialogSources && (
-        <AddArchiveDialog
-           defaultName={`${basename(dialogSources[0]).replace(/\.[^/.]+$/, "")}.init`}
-          onCancel={() => setDialogSources(null)}
-          onConfirm={async (result: ArchiveDialogResult) => {
-            const sources = dialogSources;
-            setDialogSources(null);
-            await runCreate(sources, result);
-          }}
-        />
+      {dragActive && (
+        <div className="drop-overlay">
+          <div className="drop-overlay-card">
+            <Package size={28} strokeWidth={1.5} />
+            <span>Drop to add to archive</span>
+          </div>
+        </div>
       )}
 
-      {passwordRequest && (
-        <PasswordDialog
-          error={passwordError}
-          purpose={passwordRequest.purpose}
-          onCancel={() => {
-            setPasswordRequest(null);
-            setPasswordError("");
-          }}
-          onSubmit={submitPassword}
-        />
-      )}
+      <AddArchiveDialog
+        open={dialogSources !== null}
+        defaultName={dialogSources ? `${basename(dialogSources[0]).replace(/\.[^/.]+$/, "")}.init` : ""}
+        onCancel={() => setDialogSources(null)}
+        onConfirm={async (result: ArchiveDialogResult) => {
+          const sources = dialogSources;
+          setDialogSources(null);
+          if (sources) await runCreate(sources, result);
+        }}
+      />
 
-      {infoOpen && summary && (
-        <SimpleModal title="Archive info" onClose={() => setInfoOpen(false)}>
+      <PasswordDialog
+        open={passwordRequest !== null}
+        error={passwordError}
+        purpose={passwordRequest?.purpose}
+        onCancel={() => {
+          setPasswordRequest(null);
+          setPasswordError("");
+        }}
+        onSubmit={submitPassword}
+      />
+
+      <SimpleModal title="Archive info" open={infoOpen && !!summary} onClose={() => setInfoOpen(false)}>
+        {summary && (
           <dl className="info-grid">
             <dt>Format</dt>
             <dd>{summary.format.toUpperCase()}</dd>
@@ -646,44 +710,42 @@ export default function App() {
               </>
             )}
           </dl>
-        </SimpleModal>
-      )}
+        )}
+      </SimpleModal>
 
-      {aboutOpen && (
-        <SimpleModal title="About Syncinit" onClose={() => setAboutOpen(false)}>
-          <p style={{ margin: "0 0 8px", color: "var(--muted)" }}>
-            A fast, modern archive manager for Windows — a practical WinRAR alternative.
-          </p>
-          <p style={{ margin: 0, fontSize: 12, color: "var(--faint)" }}>
-            No telemetry, no network calls. See PRIVACY.md / TERMS.md / LICENSE in the install
-            folder for the full policies.
-          </p>
-        </SimpleModal>
-      )}
+      <SimpleModal title="About Syncinit" open={aboutOpen} onClose={() => setAboutOpen(false)}>
+        <p style={{ margin: "0 0 8px", color: "var(--muted)" }}>
+          A fast, modern archive manager for Windows — a practical WinRAR alternative.
+        </p>
+        <p style={{ margin: 0, fontSize: 12, color: "var(--faint)" }}>
+          No telemetry, no network calls. See PRIVACY.md / TERMS.md / LICENSE in the install
+          folder for the full policies.
+        </p>
+      </SimpleModal>
     </div>
   );
 }
 
 function SimpleModal({
   title,
+  open,
   onClose,
   children,
 }: {
   title: string;
+  open: boolean;
   onClose: () => void;
   children: React.ReactNode;
 }) {
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 360 }}>
-        <div className="modal-header">
-          <span>{title}</span>
-          <button className="icon-btn" onClick={onClose}>
-            <X size={14} />
-          </button>
-        </div>
-        <div className="modal-body">{children}</div>
+    <Modal open={open} onClose={onClose} className="simple-modal" ariaLabel={title}>
+      <div className="modal-header">
+        <span>{title}</span>
+        <button className="icon-btn" onClick={onClose}>
+          <X size={14} />
+        </button>
       </div>
-    </div>
+      <div className="modal-body">{children}</div>
+    </Modal>
   );
 }

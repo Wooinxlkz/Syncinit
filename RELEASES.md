@@ -1,5 +1,47 @@
 # Releases
 
+## v0.1.8
+
+- **Dialogs rebuilt to match Xuro's UI**: Add-to-archive, the PIN/password
+  prompt, About, and Archive info now share one `Modal` component (ported
+  from Xuro's `src/components/ui/Modal.tsx`) — rendered into a portal so
+  it's never clipped, spring-animated open/close instead of the old plain
+  `div` with no motion, focus-trapped, closes on Escape or backdrop click.
+  The dialog panel no longer clips its own content (`overflow: hidden` →
+  rounded header/footer instead), so an internal dropdown can open past
+  the panel edge instead of being cut off.
+- **Locale dropdown fixed**: it had both a CSS `@keyframes` animation and
+  a framer-motion animation running on the same panel at once, fighting
+  over opacity/transform — that's what made opening it feel broken. Now
+  motion-only, same as the rest of the app.
+- **Drag-and-drop implemented** — this genuinely didn't exist before:
+  `dragDropEnabled` was `false` in `tauri.conf.json` and there was no
+  listener at all, so dropping files onto the window did nothing no
+  matter what. Now `dragDropEnabled: true` plus a real
+  `getCurrentWebview().onDragDropEvent()` listener, with a drop-target
+  overlay, wired straight into the same Add-to-archive dialog "Add
+  files…" already uses.
+- **Explorer "Add to archive…" fixed for the case that actually mattered**:
+  the app had no single-instance handling, so triggering a context-menu
+  command while Syncinit was already open spawned a second, separate
+  process instead of using the open window — which is what "doesn't
+  work" looked like in practice. `tauri-plugin-single-instance` now
+  forwards the new invocation's files to the already-running window.
+- **Legacy registry cleanup**: earlier installs (from the Zarc/Tugur
+  rebrands) could leave old "Zarc"/"Tugur" shell-menu registry trees
+  sitting alongside the current "Syncinit" one — the source of seeing the
+  old name in the right-click menu on an upgraded install. Every app
+  launch now deletes those legacy trees before re-registering.
+  Windows 11 still tucks non-pinned shell entries under "Show more
+  options" for every classic-registered app (WinRAR included, without a
+  packaged extension) — that's an OS-level menu behavior, not something a
+  registry entry can override.
+- **`.init` file icon regenerated** from the latest logo, as a proper
+  multi-resolution `.ico` (16 up to 256px) instead of a single 256px
+  frame — Explorer picks a different embedded size per view (list icons,
+  large icons, thumbnails), so a single-size icon could render blank in
+  some views. The app's own icon is untouched.
+
 ## v0.1.7
 
 - **Rebrand: Tugur → Syncinit**, and the archive format extension

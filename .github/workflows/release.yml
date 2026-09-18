@@ -99,12 +99,12 @@ jobs:
             exit 1
           }
 
-          cp "$SETUP" "release-artifacts/Koink_${VERSION}_x64-setup.exe"
+          cp "$SETUP" "release-artifacts/Syncinit_${VERSION}_x64-setup.exe"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: koink-windows-${{ env.VERSION }}
+          name: syncinit-windows-${{ env.VERSION }}
           path: release-artifacts/
           if-no-files-found: error
 
@@ -126,7 +126,7 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: koink-windows-${{ env.VERSION }}
+          name: syncinit-windows-${{ env.VERSION }}
           path: release-artifacts
 
       - name: Publish to GitHub release
@@ -136,7 +136,7 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --generate-notes \
-              --title "Koink ${VERSION}"
+              --title "Syncinit ${VERSION}"
 
           gh release upload "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \

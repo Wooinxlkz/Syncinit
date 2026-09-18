@@ -1,6 +1,6 @@
 [package]
 name = "syncinit"
-version = "0.1.7"
+version = "0.1.8"
 description = "Syncinit — a fast, modern archive manager (WinRAR alternative) built in Rust + Tauri"
 edition = "2021"
 authors = ["Ch. Abdelkrim"]
@@ -14,6 +14,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
