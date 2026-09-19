@@ -338,7 +338,7 @@ export default function App() {
     setBusy(true);
     setProgress(null);
     try {
-      await api.createArchive({
+      const warnings = await api.createArchive({
         destination,
         sources,
         level: result.level,
@@ -358,6 +358,15 @@ export default function App() {
         }
       }
       await loadArchive(destination);
+      // The archive was still created successfully — these are paths that
+      // couldn't be read (permission denied, a broken symlink, a path too
+      // long for Windows), so it's a warning, not a failure. Surfaced
+      // instead of the old silent-omission behavior.
+      if (warnings.length > 0) {
+        setStatus(
+          `Archive created, but ${warnings.length} item${warnings.length === 1 ? "" : "s"} couldn't be added: ${warnings.slice(0, 3).join("; ")}${warnings.length > 3 ? "…" : ""}`
+        );
+      }
       return destination;
     } catch (err) {
       setStatus(isCancelledError(err) ? "Cancelled." : String(err));

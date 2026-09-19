@@ -33,7 +33,10 @@ export interface CreateOptions {
 export const api = {
   listArchive: (path: string, password?: string) =>
     invoke<ArchiveSummary>("list_archive", { path, password: password ?? null }),
-  createArchive: (options: CreateOptions) => invoke<void>("create_archive", { options }),
+  // Returns paths that couldn't be added (permission denied, a broken
+  // symlink, a Windows long-path failure, etc.) instead of silently
+  // leaving them out — an empty array means everything made it in.
+  createArchive: (options: CreateOptions) => invoke<string[]>("create_archive", { options }),
   deleteSources: (sources: string[], destination: string) =>
     invoke<number>("delete_sources", { sources, destination }),
   deleteEntries: (path: string, names: string[]) => invoke<number>("delete_entries", { path, names }),

@@ -1,5 +1,42 @@
 # Releases
 
+## v0.1.12
+
+Full audit fix, everything from the "check all the bullshit errors" list:
+
+- **The freeze — actually fixed everywhere, not just Add.** In Tauri 2 a
+  synchronous `fn` command runs on the *main thread*; only `async fn`
+  commands run off it. Every command that touches the filesystem for real
+  (`list_archive`, `create_archive`, `extract_archive`, `test_archive`,
+  `delete_entries`, `delete_sources`, and `register_context_menu`) was
+  plain `fn`. Converted all of them to `async fn` wrapping the real work in
+  `tauri::async_runtime::spawn_blocking` — this was never just an "Add"
+  bug, it was every heavy operation in the app freezing the window for as
+  long as it took.
+- **Silent data loss when creating an archive — fixed.** The directory
+  walk used `.filter_map(|e| e.ok())`, which silently dropped any path it
+  couldn't read (permission denied, a broken symlink, Windows' 260-char
+  path limit) with zero indication — the archive would finish and report
+  success even with files missing from it. Now every skipped path is
+  collected and returned to the UI as an explicit warning after the
+  archive completes. Also: directory walks now follow symlinks
+  (`follow_links(true)`), so a symlinked folder's actual contents get
+  included instead of it just appearing as an empty folder in the
+  archive — verified against walkdir's own built-in symlink-cycle
+  detection first, so this can't introduce a hang of its own.
+- **A hard-crash path removed.** `test_archive`'s non-zip fallback did
+  `path.to_str().unwrap()` — on the rare path that isn't valid UTF-8,
+  this panics, and this build has `panic = "abort"` in the release
+  profile, so a panic here doesn't fail gracefully, it takes down the
+  whole app. Switched to a lossy conversion that can't panic.
+- **`open_url` hardened.** Replaced the `cmd /C start` hack with the
+  `open` crate — its own docs confirm the `cmd`-based approach "cannot
+  safely receive untrusted paths because cmd interprets its arguments as
+  shell syntax," which was exactly the theoretical risk flagged. `open`'s
+  default (non-`insecure`) path avoids it entirely, no console window.
+- **Update-check fetch now has a timeout.** Previously a hung (not
+  erroring) request to GitHub would just never resolve.
+
 ## v0.1.11
 
 - **Found the actual cause of the .init icon showing the main app icon**:

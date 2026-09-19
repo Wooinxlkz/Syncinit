@@ -90,7 +90,16 @@ fn cleanup_legacy_registrations() {
 }
 
 #[tauri::command]
-fn register_context_menu() -> Result<bool, String> {
+async fn register_context_menu() -> Result<bool, String> {
+    // ~40 registry writes on a fresh install/upgrade — fast (a handful of
+    // ms) but still main-thread work every single launch if left as a sync
+    // command; same fix as the heavy archive commands above.
+    tauri::async_runtime::spawn_blocking(register_context_menu_impl)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn register_context_menu_impl() -> Result<bool, String> {
     #[cfg(not(windows))]
     {
         return Ok(false);
@@ -339,35 +348,24 @@ fn reveal_in_file_manager(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Opens a URL in the OS default browser, the same CREATE_NO_WINDOW way
-/// reveal_in_file_manager opens Explorer above — used for the update
-/// checker's "View release" link, so it doesn't hit the same console-flash
-/// issue the @tauri-apps/plugin-shell `open()` has on Windows.
+/// Opens a URL in the OS default browser — used for the update checker's
+/// "View release" link. Uses the `open` crate rather than
+/// @tauri-apps/plugin-shell's JS open() (which shells out via cmd.exe on
+/// Windows and flashes a console window) or a hand-rolled `cmd /C start`
+/// (which has a real, if currently low-risk, shell-metacharacter issue:
+/// cmd.exe re-parses the command line a second time after Rust's own argv
+/// quoting, so a URL containing &, |, ^, etc. could be misinterpreted).
+/// `open` calls ShellExecuteW directly on Windows — no console window, no
+/// second parsing pass, no cmd.exe involved at all.
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     if !url.starts_with("https://") {
         return Err("Refusing to open a non-https URL".into());
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &url])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    open::that_detached(&url).map_err(|e| e.to_string())
 }
+
+/// Tracks the cancel flag for whichever create/extract operation is currently
 /// running. Syncinit only ever runs one at a time (single window, one
 /// modal-driven flow), so a single slot is enough.
 struct CancelState(Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>>);
@@ -378,7 +376,7 @@ struct ProgressPayload {
     total: u64,
 }
 
-fn begin_operation(state: &tauri::State<CancelState>) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+fn begin_operation(state: &tauri::State<'_, CancelState>) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
     let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     *state.0.lock().unwrap() = Some(flag.clone());
     flag
@@ -391,69 +389,104 @@ fn cancel_operation(state: tauri::State<CancelState>) {
     }
 }
 
+// Every command below that touches the filesystem for real (as opposed to
+// the near-instant registry/path-string ones above) is `async fn` wrapping
+// its actual work in `tauri::async_runtime::spawn_blocking`. This matters:
+// in Tauri 2, a *synchronous* `fn` command runs on the main thread — the
+// same thread that pumps the window's event loop and repaints the webview.
+// These used to all be plain `fn`, so compressing/extracting/testing a real
+// archive froze the entire window (toolbar included, not just the operation
+// itself) for as long as it took. `spawn_blocking` moves the work onto a
+// dedicated blocking-friendly thread from Tokio's pool and `.await`s it, so
+// the main thread stays free the whole time.
+
 #[tauri::command]
-fn list_archive(path: String, password: Option<String>) -> Result<ArchiveSummary, String> {
-    archive::list_archive(&path, password.as_deref()).map_err(|e| e.to_string())
+async fn list_archive(path: String, password: Option<String>) -> Result<ArchiveSummary, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        archive::list_archive(&path, password.as_deref()).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn create_archive(
+async fn create_archive(
     app: tauri::AppHandle,
-    state: tauri::State<CancelState>,
+    state: tauri::State<'_, CancelState>,
     options: CreateOptions,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let cancel_flag = begin_operation(&state);
-    // Throttled: emitting on every 64 KiB chunk of a multi-GB file floods
-    // the webview IPC channel and is what was making the UI stutter/freeze
-    // during large operations elsewhere in this app — cap it to ~20/sec.
-    let last_emit = std::cell::Cell::new(std::time::Instant::now());
-    let emit_app = app.clone();
-    let on_progress = move |done: u64, total: u64| {
-        if last_emit.get().elapsed().as_millis() < 50 && done < total {
-            return;
-        }
-        last_emit.set(std::time::Instant::now());
-        let _ = emit_app.emit("syncinit://progress", ProgressPayload { done, total });
-    };
-    let ctx = archive::ProgressCtx { on_progress: Some(&on_progress), cancelled: Some(&cancel_flag) };
-    archive::create_archive(&options, &ctx).map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        // Throttled: emitting on every 64 KiB chunk of a multi-GB file floods
+        // the webview IPC channel and is what was making the UI stutter/freeze
+        // during large operations elsewhere in this app — cap it to ~20/sec.
+        let last_emit = std::cell::Cell::new(std::time::Instant::now());
+        let on_progress = move |done: u64, total: u64| {
+            if last_emit.get().elapsed().as_millis() < 50 && done < total {
+                return;
+            }
+            last_emit.set(std::time::Instant::now());
+            let _ = app.emit("syncinit://progress", ProgressPayload { done, total });
+        };
+        let ctx = archive::ProgressCtx { on_progress: Some(&on_progress), cancelled: Some(&cancel_flag) };
+        // Ok(warnings): a non-empty list means the archive was created but
+        // some paths couldn't be added (see archive::create_archive's own
+        // doc comment) — the frontend surfaces these rather than the old
+        // behavior of silently pretending everything made it in.
+        archive::create_archive(&options, &ctx).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn delete_sources(sources: Vec<String>, destination: String) -> Result<usize, String> {
-    archive::delete_sources(&sources, &destination).map_err(|e| e.to_string())
+async fn delete_sources(sources: Vec<String>, destination: String) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        archive::delete_sources(&sources, &destination).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn delete_entries(path: String, names: Vec<String>) -> Result<usize, String> {
-    archive::delete_entries(&path, &names, &archive::ProgressCtx::none()).map_err(|e| e.to_string())
+async fn delete_entries(path: String, names: Vec<String>) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        archive::delete_entries(&path, &names, &archive::ProgressCtx::none()).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn extract_archive(
+async fn extract_archive(
     app: tauri::AppHandle,
-    state: tauri::State<CancelState>,
+    state: tauri::State<'_, CancelState>,
     path: String,
     destination: String,
     password: Option<String>,
 ) -> Result<usize, String> {
     let cancel_flag = begin_operation(&state);
-    let last_emit = std::cell::Cell::new(std::time::Instant::now());
-    let emit_app = app.clone();
-    let on_progress = move |done: u64, total: u64| {
-        if last_emit.get().elapsed().as_millis() < 50 && done < total {
-            return;
-        }
-        last_emit.set(std::time::Instant::now());
-        let _ = emit_app.emit("syncinit://progress", ProgressPayload { done, total });
-    };
-    let ctx = archive::ProgressCtx { on_progress: Some(&on_progress), cancelled: Some(&cancel_flag) };
-    archive::extract_archive(&path, &destination, password.as_deref(), &ctx).map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let last_emit = std::cell::Cell::new(std::time::Instant::now());
+        let on_progress = move |done: u64, total: u64| {
+            if last_emit.get().elapsed().as_millis() < 50 && done < total {
+                return;
+            }
+            last_emit.set(std::time::Instant::now());
+            let _ = app.emit("syncinit://progress", ProgressPayload { done, total });
+        };
+        let ctx = archive::ProgressCtx { on_progress: Some(&on_progress), cancelled: Some(&cancel_flag) };
+        archive::extract_archive(&path, &destination, password.as_deref(), &ctx).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn test_archive(path: String) -> Result<bool, String> {
-    archive::test_archive(&path).map_err(|e| e.to_string())
+async fn test_archive(path: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || archive::test_archive(&path).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

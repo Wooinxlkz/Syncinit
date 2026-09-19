@@ -37,9 +37,21 @@ function isNewer(current: string, candidate: string): boolean {
  *  and should never be the thing that breaks a launch). */
 export async function checkForUpdate(currentVersion: string): Promise<UpdateInfo | null> {
   try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-      headers: { Accept: "application/vnd.github+json" },
-    });
+    // AbortController timeout: without one, a fetch that hangs (rather than
+    // erroring outright — a stalled connection, not a clean failure) never
+    // resolves or rejects, so this check would just sit there silently
+    // forever instead of the few-hundred-ms round trip it should be.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    let res: Response;
+    try {
+      res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+        headers: { Accept: "application/vnd.github+json" },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
     if (!res.ok) return null;
     const data = await res.json();
     const tag: string = data.tag_name ?? "";

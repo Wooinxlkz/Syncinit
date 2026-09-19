@@ -1,6 +1,6 @@
 [package]
 name = "syncinit"
-version = "0.1.11"
+version = "0.1.12"
 description = "Syncinit — a fast, modern archive manager (WinRAR alternative) built in Rust + Tauri"
 edition = "2021"
 authors = ["Ch. Abdelkrim"]
@@ -20,6 +20,14 @@ tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Opens the update banner's "View release" link. Not @tauri-apps/plugin-shell's
+# open() — that goes through cmd.exe on Windows and flashes a console window.
+# Not our own cmd /C start hack either — that has a real, if currently
+# low-risk, shell-metacharacter reparsing issue (cmd.exe re-parses the
+# command line after Rust's own argv quoting, so a URL containing &, |, ^
+# etc. could be misinterpreted). This crate calls ShellExecuteW directly on
+# Windows: no console window, no second parsing pass.
+open = "5"
 
 # archive formats
 zip = { version = "2", default-features = false, features = ["deflate", "deflate64", "bzip2", "zstd", "time", "aes-crypto"] }

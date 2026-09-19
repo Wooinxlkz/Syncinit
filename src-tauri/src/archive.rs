@@ -310,8 +310,13 @@ fn list_7z(path: &Path) -> Result<ArchiveSummary> {
     })
 }
 
-/// Create a new archive from a set of source files/directories.
-pub fn create_archive(opts: &CreateOptions, ctx: &ProgressCtx) -> Result<()> {
+/// Create a new archive from a set of source files/directories. Returns
+/// paths that couldn't be added (permission denied, a path too long for
+/// Windows' 260-character limit, a broken symlink, etc.) instead of
+/// silently omitting them from the archive — an archiver that quietly
+/// leaves things out and still reports success is worse than one that
+/// tells you what it couldn't get to.
+pub fn create_archive(opts: &CreateOptions, ctx: &ProgressCtx) -> Result<Vec<String>> {
     if !opts.format.is_writable() {
         return Err(ArchiveError::UnsupportedFormat(format!(
             "{:?} writing not implemented yet",
@@ -334,13 +339,20 @@ enum CompressorKind {
 }
 
 /// Total bytes across all sources, for progress denominators. Cheap
-/// metadata-only walk, no file contents touched.
+/// metadata-only walk, no file contents touched. `follow_links(true)` so a
+/// symlinked directory's actual contents get counted (and, in
+/// create_zip_into/create_tar, actually walked and added) instead of the
+/// symlink just appearing as an empty folder in the archive.
 fn estimate_total_bytes(sources: &[String]) -> u64 {
     let mut total = 0u64;
     for src in sources {
         let src_path = PathBuf::from(src);
         if src_path.is_dir() {
-            for entry in walkdir::WalkDir::new(&src_path).into_iter().filter_map(|e| e.ok()) {
+            for entry in walkdir::WalkDir::new(&src_path)
+                .follow_links(true)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
                 if entry.file_type().is_file() {
                     total += entry.metadata().map(|m| m.len()).unwrap_or(0);
                 }
@@ -377,7 +389,7 @@ fn copy_with_progress<R: Read, W: Write>(
     Ok(copied)
 }
 
-fn create_zip(opts: &CreateOptions, ctx: &ProgressCtx) -> Result<()> {
+fn create_zip(opts: &CreateOptions, ctx: &ProgressCtx) -> Result<Vec<String>> {
     let destination = Path::new(&opts.destination);
     let temp_path = destination.with_extension(format!(
         "{}.syncinit-part-{}",
@@ -402,7 +414,8 @@ fn create_zip_into(
     ctx: &ProgressCtx,
     destination: &Path,
     temp_path: &Path,
-) -> Result<()> {
+) -> Result<Vec<String>> {
+    let mut warnings = Vec::new();
     let total = estimate_total_bytes(&opts.sources);
     let mut done = 0u64;
 
@@ -425,10 +438,23 @@ fn create_zip_into(
             .unwrap_or_default();
 
         if src_path.is_dir() {
-            for entry in walkdir::WalkDir::new(&src_path)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
+            for item in walkdir::WalkDir::new(&src_path).follow_links(true).into_iter() {
+                let entry = match item {
+                    Ok(e) => e,
+                    Err(e) => {
+                        // Previously: `.filter_map(|e| e.ok())` here just
+                        // dropped this path with zero trace — the archive
+                        // would finish and report success even though a
+                        // file was missing from it. Record why instead and
+                        // keep going with everything that *is* readable.
+                        warnings.push(format!(
+                            "{}: {}",
+                            e.path().map(|p| p.display().to_string()).unwrap_or_default(),
+                            e
+                        ));
+                        continue;
+                    }
+                };
                 let path = entry.path();
                 let relative = path.strip_prefix(&src_path).unwrap_or(path);
                 let zip_path = if relative.as_os_str().is_empty() {
@@ -443,8 +469,17 @@ fn create_zip_into(
                 if path.is_dir() {
                     writer.add_directory(zip_path, zip_options(opts, false))?;
                 } else {
+                    // Open *before* start_file — calling start_file first and
+                    // then failing to open would leave a dangling empty entry
+                    // in the zip instead of just cleanly not adding it.
+                    let mut f = match File::open(path) {
+                        Ok(f) => BufReader::with_capacity(128 * 1024, f),
+                        Err(e) => {
+                            warnings.push(format!("{}: {}", path.display(), e));
+                            continue;
+                        }
+                    };
                     writer.start_file(zip_path, zip_options(opts, should_store(path, opts)))?;
-                    let mut f = BufReader::with_capacity(128 * 1024, File::open(path)?);
                     done += copy_with_progress(&mut f, &mut writer, done, total, ctx)?;
                 }
             }
@@ -464,7 +499,7 @@ fn create_zip_into(
         std::fs::remove_file(destination)?;
     }
     std::fs::rename(temp_path, destination)?;
-    Ok(())
+    Ok(warnings)
 }
 
 fn should_store(path: &Path, opts: &CreateOptions) -> bool {
@@ -523,7 +558,8 @@ fn zip_options(opts: &CreateOptions, store: bool) -> zip::write::FileOptions<()>
     options
 }
 
-fn create_tar(opts: &CreateOptions, compressor: Option<CompressorKind>, ctx: &ProgressCtx) -> Result<()> {
+fn create_tar(opts: &CreateOptions, compressor: Option<CompressorKind>, ctx: &ProgressCtx) -> Result<Vec<String>> {
+    let mut warnings = Vec::new();
     let total = estimate_total_bytes(&opts.sources);
     let mut done = 0u64;
 
@@ -555,7 +591,18 @@ fn create_tar(opts: &CreateOptions, compressor: Option<CompressorKind>, ctx: &Pr
             .unwrap_or_default();
 
         if src_path.is_dir() {
-            for entry in walkdir::WalkDir::new(&src_path).into_iter().filter_map(|e| e.ok()) {
+            for item in walkdir::WalkDir::new(&src_path).follow_links(true).into_iter() {
+                let entry = match item {
+                    Ok(e) => e,
+                    Err(e) => {
+                        warnings.push(format!(
+                            "{}: {}",
+                            e.path().map(|p| p.display().to_string()).unwrap_or_default(),
+                            e
+                        ));
+                        continue;
+                    }
+                };
                 let path = entry.path();
                 let relative = path.strip_prefix(&src_path).unwrap_or(path);
                 let tar_path = if relative.as_os_str().is_empty() {
@@ -572,7 +619,13 @@ fn create_tar(opts: &CreateOptions, compressor: Option<CompressorKind>, ctx: &Pr
                 }
 
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                let mut f = BufReader::with_capacity(128 * 1024, File::open(path)?);
+                let mut f = match File::open(path) {
+                    Ok(f) => BufReader::with_capacity(128 * 1024, f),
+                    Err(e) => {
+                        warnings.push(format!("{}: {}", path.display(), e));
+                        continue;
+                    }
+                };
                 let mut header = tar::Header::new_gnu();
                 header.set_size(size);
                 header.set_mode(0o644);
@@ -595,7 +648,7 @@ fn create_tar(opts: &CreateOptions, compressor: Option<CompressorKind>, ctx: &Pr
     }
 
     tar_builder.finish()?;
-    Ok(())
+    Ok(warnings)
 }
 
 fn num_cpus() -> u32 {
@@ -721,7 +774,12 @@ pub fn test_archive(path: &str) -> Result<bool> {
 
     if !matches!(format, Format::Init | Format::Zip) {
         // Non-zip formats: fall back to a full-read sanity check.
-        list_archive(path.to_str().unwrap(), None)?;
+        // .to_string_lossy() instead of .to_str().unwrap() — an unwrap here
+        // would panic (and on Windows a main-thread-adjacent panic like this
+        // can take the whole app down) on the rare path that isn't valid
+        // UTF-8. Lossy conversion just means a lossy display string for the
+        // one code path (fallback full-read sanity check) that needs it.
+        list_archive(&path.to_string_lossy(), None)?;
         return Ok(true);
     }
 
