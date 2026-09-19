@@ -1,8 +1,10 @@
-/* Design tokens copied 1:1 from Xuro (src/styles.css .dark block) so Syncinit's
-   palette and feel match it exactly. Syncinit is dark-only for now, so these are
-   just set on :root rather than split into a light/.dark pair — copy Xuro's
-   :root block here too if a light theme gets added later. */
-:root {
+/* Design tokens copied 1:1 from Xuro (src/styles.css :root + .dark blocks),
+   split the same way: :root (no data-theme, and explicit [data-theme="dark"])
+   holds the dark palette as the default, [data-theme="light"] overrides it —
+   toggled from Settings > General, persisted in localStorage, applied by
+   setting document.documentElement.dataset.theme in App.tsx. */
+:root,
+:root[data-theme="dark"] {
   --bg: #1a1a1a;
   --panel: #151515;
   --sunken: #0f0f0f;
@@ -33,12 +35,62 @@
   --radius-lg: 10px;
 }
 
+:root[data-theme="light"] {
+  --bg: #fbfbfa;
+  --panel: #f4f4f2;
+  --sunken: #e9e9e6;
+  --ink: #191919;
+  --muted: #6e6e6a;
+  --faint: #a3a39e;
+  --line: #e3e3e0;
+  --line-soft: #ececea;
+  --hover: rgba(25, 25, 25, 0.05);
+  --active: rgba(25, 25, 25, 0.09);
+  --invert: #1c1c1c;
+  --invert-ink: #fbfbfa;
+  --danger: oklch(0.48 0.18 27);
+  --success: oklch(0.42 0.12 145);
+  --success-bg: oklch(0.95 0.04 145);
+  --success-line: oklch(0.79 0.1 145);
+  --info: oklch(0.44 0.16 255);
+  --info-bg: oklch(0.95 0.035 255);
+  --info-line: oklch(0.8 0.09 255);
+  --warning: oklch(0.45 0.11 75);
+  --warning-bg: oklch(0.96 0.05 85);
+  --warning-line: oklch(0.82 0.11 80);
+}
+
 .app {
   display: flex;
   flex-direction: column;
   height: 100vh;
   background: var(--bg);
   color: var(--ink);
+}
+
+/* Themed scrollbars — WebView2 (this app's runtime on Windows) is Chromium,
+   so the ::-webkit-scrollbar rules are what actually apply; scrollbar-color
+   is there too for any non-Chromium context (e.g. previewing in a browser). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--faint) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--faint);
+  border-radius: 999px;
+  border: 2px solid var(--panel);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  background-clip: padding-box;
 }
 
 .toolbar {
@@ -291,6 +343,16 @@ tbody tr.selected {
   flex-direction: column;
   gap: 12px;
   min-height: 190px;
+}
+/* Add-to-archive dialog: fixed body height instead of the generic
+   min-height above, so switching tabs (General/Advanced/Options/Comment —
+   each with a different natural content height) doesn't resize the whole
+   card around the person. Shorter tabs just leave the extra space empty;
+   a taller one (unlikely at this width) would scroll instead of growing. */
+.add-archive-modal .modal-body {
+  height: 280px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .field {
@@ -645,6 +707,66 @@ tbody tr.selected {
   background: var(--panel);
   overflow: hidden;
 }
+
+/* Theme switch (Dark/Light) — segmented control */
+.theme-switch {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.theme-switch-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
+}
+.theme-switch-btn:hover {
+  color: var(--ink);
+}
+.theme-switch-btn.active {
+  background: var(--invert);
+  color: var(--invert-ink);
+}
+
+/* Themed native <select> — used for Language in Settings */
+.settings-select {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s var(--ease-out);
+}
+.settings-select:hover {
+  border-color: var(--faint);
+}
+.settings-select:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+.settings-select option {
+  background: var(--panel);
+  color: var(--ink);
+}
+.settings-select option:disabled {
+  color: var(--faint);
+}
+
 .settings-row {
   display: flex;
   align-items: center;
@@ -849,6 +971,54 @@ tbody tr.selected {
 }
 .icon-toolbar-btn-settings {
   margin-left: auto;
+}
+
+/* ---- Update-available banner ---- */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--info-bg);
+  border-bottom: 1px solid var(--info-line);
+  color: var(--ink);
+  font-size: 12px;
+}
+.update-banner svg {
+  color: var(--info);
+  flex-shrink: 0;
+}
+.update-banner span {
+  flex: 1;
+  min-width: 0;
+}
+.update-banner-link {
+  border: 1px solid var(--info-line);
+  background: transparent;
+  color: var(--info);
+  border-radius: var(--radius-sm);
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s ease;
+}
+.update-banner-link:hover {
+  background: var(--hover);
+}
+.update-banner-close {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  flex-shrink: 0;
+}
+.update-banner-close:hover {
+  color: var(--ink);
 }
 
 /* ---- Find bar ---- */

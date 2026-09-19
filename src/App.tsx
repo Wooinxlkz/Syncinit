@@ -35,6 +35,9 @@ import AddArchiveDialog, { type ArchiveDialogResult } from "./AddArchiveDialog";
 import PasswordDialog from "./PasswordDialog";
 import { Modal } from "./Modal";
 import { SettingsModal } from "./Settings";
+import { UpdateBanner } from "./UpdateBanner";
+import { checkForUpdate, dismissUpdate, type UpdateInfo } from "./updateCheck";
+import { version as APP_VERSION } from "../package.json";
 import "./App.css";
 
 type LaunchAction =
@@ -66,6 +69,17 @@ function basename(p: string) {
   const clean = p.replace(/[\\/]+$/, "");
   const idx = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
   return idx >= 0 ? clean.slice(idx + 1) : clean;
+}
+
+// Default archive name for a single source path: strip its own extension
+// (matching WinRAR's "Add to 'name.rar'" convention — "photo.jpg" suggests
+// "photo.init", not "photo.jpg.init") before appending ".init". Used by
+// every "quick add" path (Explorer's "Add to .init archive"/"Compress and
+// email…" and the Add-to-archive dialog's default) so they agree, and so
+// re-running "Add to .init archive" on a file that's already ".init" gives
+// back the same name instead of stacking a second ".init.init" suffix.
+function defaultInitName(path: string) {
+  return `${basename(path).replace(/\.[^/.]+$/, "")}.init`;
 }
 
 function archiveExtension(format: ArchiveDialogResult["format"]) {
@@ -116,6 +130,29 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<"general" | "about">("general");
   const [dragActive, setDragActive] = useState(false);
+  const [theme, setTheme] = useState<"dark" | "light">(
+    () => (localStorage.getItem("syncinit:theme") as "dark" | "light" | null) ?? "dark"
+  );
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("syncinit:theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    // Delayed slightly so it never competes with the app's own startup
+    // work (registering the context menu, reading the launch action).
+    // Failures (offline, GitHub rate-limited, etc.) resolve to null and are
+    // silently ignored — this is a courtesy notice, not something that
+    // should ever block or error out the app.
+    const timer = setTimeout(() => {
+      checkForUpdate(APP_VERSION).then((info) => {
+        if (info) setUpdateInfo(info);
+      });
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, []);
   const [favorites, setFavorites] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("syncinit:favorites") ?? "[]");
@@ -220,7 +257,7 @@ export default function App() {
         setDialogSources(action.paths);
       } else if (action.mode === "add-default") {
         await runCreate(action.paths, {
-          name: `${basename(action.paths[0])}.init`,
+          name: defaultInitName(action.paths[0]),
           format: "init",
           level: 6,
           password: "",
@@ -231,7 +268,7 @@ export default function App() {
         });
       } else if (action.mode === "add-and-mail") {
         const dest = await runCreate(action.paths, {
-          name: `${basename(action.paths[0])}.init`,
+          name: defaultInitName(action.paths[0]),
           format: "init",
           level: 6,
           password: "",
@@ -532,6 +569,15 @@ export default function App() {
         ]}
       />
 
+      <UpdateBanner
+        info={updateInfo}
+        currentVersion={APP_VERSION}
+        onDismiss={() => {
+          if (updateInfo) dismissUpdate(updateInfo.version);
+          setUpdateInfo(null);
+        }}
+      />
+
       <div className="icon-toolbar">
         <button className="icon-toolbar-btn" onClick={addFilesViaDialog} disabled={busy}>
           <Plus size={20} strokeWidth={1.75} />
@@ -682,7 +728,7 @@ export default function App() {
 
       <AddArchiveDialog
         open={dialogSources !== null}
-        defaultName={dialogSources ? `${basename(dialogSources[0]).replace(/\.[^/.]+$/, "")}.init` : ""}
+        defaultName={dialogSources ? defaultInitName(dialogSources[0]) : ""}
         onCancel={() => setDialogSources(null)}
         onConfirm={async (result: ArchiveDialogResult) => {
           const sources = dialogSources;
@@ -742,6 +788,8 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         locale={locale}
         onLocaleChange={setLocale}
+        theme={theme}
+        onThemeChange={setTheme}
       />
     </div>
   );

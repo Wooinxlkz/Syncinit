@@ -77,7 +77,7 @@ export default function AddArchiveDialog({ open, defaultName, onCancel, onConfir
   }
 
   return (
-    <Modal open={open} onClose={onCancel} ariaLabel="Archive name and parameters">
+    <Modal open={open} onClose={onCancel} className="add-archive-modal" ariaLabel="Archive name and parameters">
       <div className="modal-header">
         <span>Archive name and parameters</span>
         <button className="icon-btn" onClick={onCancel}>

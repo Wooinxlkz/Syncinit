@@ -146,6 +146,7 @@ fn register_context_menu() -> Result<bool, String> {
             if root.ends_with('*') {
                 let open = format!("{menu}\\shell\\00_open");
                 set_reg_value(&open, "", "Open").map_err(|e| e.to_string())?;
+                set_reg_value(&open, "Icon", &format!("{exe_str},0")).map_err(|e| e.to_string())?;
                 set_reg_value(
                     &open,
                     "AppliesTo",
@@ -157,6 +158,7 @@ fn register_context_menu() -> Result<bool, String> {
 
                 let extract = format!("{menu}\\shell\\04_extract");
                 set_reg_value(&extract, "", "Extract Here").map_err(|e| e.to_string())?;
+                set_reg_value(&extract, "Icon", &format!("{exe_str},0")).map_err(|e| e.to_string())?;
                 set_reg_value(
                     &extract,
                     "AppliesTo",
@@ -173,11 +175,13 @@ fn register_context_menu() -> Result<bool, String> {
 
             let add = format!("{menu}\\shell\\01_add");
             set_reg_value(&add, "", "Add to archive...").map_err(|e| e.to_string())?;
+            set_reg_value(&add, "Icon", &format!("{exe_str},0")).map_err(|e| e.to_string())?;
             set_reg_value(&format!("{add}\\command"), "", &format!("{exe_quoted} --add %*"))
                 .map_err(|e| e.to_string())?;
 
             let quick = format!("{menu}\\shell\\02_add_default");
             set_reg_value(&quick, "", "Add to .init archive").map_err(|e| e.to_string())?;
+            set_reg_value(&quick, "Icon", &format!("{exe_str},0")).map_err(|e| e.to_string())?;
             set_reg_value(
                 &format!("{quick}\\command"),
                 "",
@@ -187,6 +191,7 @@ fn register_context_menu() -> Result<bool, String> {
 
             let mail = format!("{menu}\\shell\\03_add_mail");
             set_reg_value(&mail, "", "Compress and email...").map_err(|e| e.to_string())?;
+            set_reg_value(&mail, "Icon", &format!("{exe_str},0")).map_err(|e| e.to_string())?;
             set_reg_value(
                 &format!("{mail}\\command"),
                 "",
@@ -322,7 +327,35 @@ fn reveal_in_file_manager(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Tracks the cancel flag for whichever create/extract is currently
+/// Opens a URL in the OS default browser, the same CREATE_NO_WINDOW way
+/// reveal_in_file_manager opens Explorer above — used for the update
+/// checker's "View release" link, so it doesn't hit the same console-flash
+/// issue the @tauri-apps/plugin-shell `open()` has on Windows.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("Refusing to open a non-https URL".into());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 /// running. Syncinit only ever runs one at a time (single window, one
 /// modal-driven flow), so a single slot is enough.
 struct CancelState(Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>>);
@@ -520,6 +553,7 @@ pub fn run() {
             debug_context_menu,
             cancel_operation,
             reveal_in_file_manager,
+            open_url,
             list_archive,
             create_archive,
             delete_sources,

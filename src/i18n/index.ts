@@ -9,21 +9,14 @@ export const SUPPORTED_LOCALES = [
   { code: "fr", label: "Français", ready: false },
   { code: "de", label: "Deutsch", ready: false },
   { code: "es", label: "Español", ready: false },
-  { code: "it", label: "Italiano", ready: false },
-  { code: "pt-BR", label: "Português (BR)", ready: false },
-  { code: "pt-PT", label: "Português (PT)", ready: false },
   { code: "nl", label: "Nederlands", ready: false },
+  { code: "no", label: "Norsk", ready: false },
   { code: "pl", label: "Polski", ready: false },
   { code: "ru", label: "Русский", ready: false },
-  { code: "tr", label: "Türkçe", ready: false },
   { code: "ar", label: "العربية", ready: false },
+  { code: "id", label: "Bahasa Indonesia", ready: false },
   { code: "zh-CN", label: "中文(简体)", ready: false },
   { code: "ja", label: "日本語", ready: false },
-  { code: "ko", label: "한국어", ready: false },
-  { code: "id", label: "Bahasa Indonesia", ready: false },
-  { code: "sv", label: "Svenska", ready: false },
-  { code: "da", label: "Dansk", ready: false },
-  { code: "ro", label: "Română", ready: false },
 ] as const;
 
 type Dict = Record<string, string>;

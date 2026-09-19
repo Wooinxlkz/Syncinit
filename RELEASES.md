@@ -1,5 +1,36 @@
 # Releases
 
+## v0.1.10
+
+- **Context menu submenu items now have icons** ("Add to archive…", "Add
+  to .init archive", "Compress and email…", "Open", "Extract Here") — none
+  of them had an `Icon` registry value set before, which is why they
+  rendered blank next to entries like WinRAR/ESET that do set one.
+- **Fixed a real `.init.init` doubling bug**: Explorer's "Add to .init
+  archive"/"Compress and email…" built their default name by appending
+  `.init` to the source's full filename without stripping its existing
+  extension — only the Add-to-archive dialog's own default name did that
+  stripping. All three now share one `defaultInitName()` helper, so
+  they agree (and re-running "Add to .init archive" on something already
+  named `*.init` no longer stacks a second `.init`).
+- On "right-click only opens the app instead of adding files": traced the
+  whole launch/single-instance path and found nothing wrong in it — worth
+  double-checking this is actually running v0.1.10 (and not a build from
+  before the "Tugur" cleanup landed) before treating it as still-open.
+- **Add-to-archive dialog no longer resizes when switching tabs** — its
+  body was sized with `min-height` (each tab's differing content height
+  could stretch it), now a fixed height with scroll as a fallback.
+- **Language list trimmed** to the 12 requested locales, and it's an
+  actual themed `<select>` dropdown in Settings now, not a row list.
+- **Light/dark theme toggle**, in Settings → General. Full light palette
+  ported 1:1 from Xuro's own light `:root` block; persisted locally.
+- **Themed scrollbars** app-wide (were the OS default before).
+- **Update checker**: a dismissible banner checks
+  github.com/Wooinxlkz/Syncinit's releases and points at the release page
+  when a newer version exists. This is a notification, not Xuro's full
+  silent auto-install — that needs a signed-update-manifest setup this
+  project doesn't have; can be built separately if wanted.
+
 ## v0.1.9
 
 - **Removed the in-app titlebar** ("Zarc" text + the language dropdown) —

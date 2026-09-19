@@ -1,6 +1,5 @@
-import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { X, Globe, Info, Package } from "lucide-react";
+import { X, Globe, Info, Package, Sun, Moon } from "lucide-react";
 import { Modal } from "./Modal";
 import { EASE_OUT } from "./ease";
 import { SUPPORTED_LOCALES } from "./i18n";
@@ -8,6 +7,7 @@ import appIcon from "../src-tauri/icons/128x128.png";
 import { version as APP_VERSION } from "../package.json";
 
 export type SettingsPage = "general" | "about";
+export type Theme = "dark" | "light";
 
 interface Props {
   open: boolean;
@@ -16,6 +16,8 @@ interface Props {
   onClose: () => void;
   locale: string;
   onLocaleChange: (code: string) => void;
+  theme: Theme;
+  onThemeChange: (theme: Theme) => void;
 }
 
 const NAV: { id: SettingsPage; label: string; icon: typeof Globe }[] = [
@@ -24,11 +26,20 @@ const NAV: { id: SettingsPage; label: string; icon: typeof Globe }[] = [
 ];
 
 const PAGE_META: Record<SettingsPage, { title: string; description: string }> = {
-  general: { title: "General", description: "Language and app behavior." },
+  general: { title: "General", description: "Language, theme and app behavior." },
   about: { title: "About", description: "Version and app info." },
 };
 
-export function SettingsModal({ open, page, onPageChange, onClose, locale, onLocaleChange }: Props) {
+export function SettingsModal({
+  open,
+  page,
+  onPageChange,
+  onClose,
+  locale,
+  onLocaleChange,
+  theme,
+  onThemeChange,
+}: Props) {
   return (
     <Modal open={open} onClose={onClose} className="settings-modal" ariaLabel="Settings">
       <div className="settings-body">
@@ -84,29 +95,53 @@ export function SettingsModal({ open, page, onPageChange, onClose, locale, onLoc
               transition={{ duration: 0.15, ease: EASE_OUT }}
             >
               {page === "general" && (
-                <section>
-                  <h4 className="settings-group-title">Language</h4>
-                  <p className="settings-group-desc">
-                    Only English ships translated right now — the rest are on the way.
-                  </p>
-                  <div className="settings-card">
-                    {SUPPORTED_LOCALES.map((l) => (
+                <>
+                  <section>
+                    <h4 className="settings-group-title">Appearance</h4>
+                    <p className="settings-group-desc">Switch between dark and light.</p>
+                    <div className="theme-switch" role="radiogroup" aria-label="Theme">
                       <button
-                        key={l.code}
-                        className="settings-row"
-                        disabled={!l.ready}
-                        onClick={() => l.ready && onLocaleChange(l.code)}
+                        type="button"
+                        role="radio"
+                        aria-checked={theme === "dark"}
+                        className={`theme-switch-btn ${theme === "dark" ? "active" : ""}`}
+                        onClick={() => onThemeChange("dark")}
                       >
-                        <span>{l.label}</span>
-                        {locale === l.code ? (
-                          <span className="settings-row-check">✓</span>
-                        ) : !l.ready ? (
-                          <span className="settings-row-soon">soon</span>
-                        ) : null}
+                        <Moon size={14} strokeWidth={1.75} />
+                        Dark
                       </button>
-                    ))}
-                  </div>
-                </section>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={theme === "light"}
+                        className={`theme-switch-btn ${theme === "light" ? "active" : ""}`}
+                        onClick={() => onThemeChange("light")}
+                      >
+                        <Sun size={14} strokeWidth={1.75} />
+                        Light
+                      </button>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h4 className="settings-group-title">Language</h4>
+                    <p className="settings-group-desc">
+                      Only English ships translated right now — the rest are on the way.
+                    </p>
+                    <select
+                      className="settings-select"
+                      value={locale}
+                      onChange={(e) => onLocaleChange(e.target.value)}
+                    >
+                      {SUPPORTED_LOCALES.map((l) => (
+                        <option key={l.code} value={l.code} disabled={!l.ready}>
+                          {l.label}
+                          {l.ready ? "" : " (soon)"}
+                        </option>
+                      ))}
+                    </select>
+                  </section>
+                </>
               )}
 
               {page === "about" && (
