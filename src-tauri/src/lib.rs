@@ -15,8 +15,20 @@ use tauri::{Emitter, Manager};
 const INIT_FILE_ICON: &[u8] = include_bytes!("../icons/filetype/init-file.ico");
 
 #[cfg(windows)]
-fn write_init_file_icon(exe: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
-    let dir = exe.parent().unwrap_or(std::path::Path::new("."));
+fn write_init_file_icon() -> std::io::Result<std::path::PathBuf> {
+    // Deliberately NOT next to the exe anymore. A normal (non-admin) install
+    // lives under `C:\Program Files\Syncinit\`, which a standard user can't
+    // write to — so writing the icon there silently failed, and the code
+    // fell back to using the *exe itself* as the DefaultIcon target, which
+    // is the main app icon. That's the actual reason .init files kept
+    // showing the main icon instead of the file-type one: it was the
+    // fallback, not a caching issue. %LOCALAPPDATA% is always writable by
+    // the current user regardless of where the app is installed.
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let dir = base.join("Syncinit");
+    std::fs::create_dir_all(&dir)?;
     let ico_path = dir.join("init-file.ico");
     // Always overwrite with whatever's embedded in *this* build. The old
     // `if !ico_path.exists()` guard here meant an upgrade with the same
@@ -228,7 +240,7 @@ fn register_context_menu() -> Result<bool, String> {
         }
 
         let init_type = "Software\\Classes\\.init";
-        let init_icon_path = write_init_file_icon(&exe)
+        let init_icon_path = write_init_file_icon()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| exe_str.clone()); // fall back to the app icon if the write fails
         set_reg_value(init_type, "", "Syncinit.Archive").map_err(|e| e.to_string())?;
@@ -513,6 +525,17 @@ fn get_launch_action(state: tauri::State<LaunchState>) -> LaunchAction {
     action
 }
 
+/// Raw process argv, logged to the devtools console on startup — a way to
+/// actually see what Explorer passed for "Add to archive…" etc. instead of
+/// guessing blind. If this doesn't show the expected `--add "C:\...\file"`
+/// shape, the bug is in the registry command string / how Windows invoked
+/// it; if it does and the dialog still didn't open, the bug is downstream
+/// in the frontend's handling of it.
+#[tauri::command]
+fn get_raw_args() -> Vec<String> {
+    std::env::args().collect()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let launch_action = parse_launch_action(&std::env::args().collect::<Vec<_>>());
@@ -561,7 +584,8 @@ pub fn run() {
             extract_archive,
             test_archive,
             detect_format,
-            get_launch_action
+            get_launch_action,
+            get_raw_args
         ])
         .run(tauri::generate_context!())
         .expect("error while running Syncinit");

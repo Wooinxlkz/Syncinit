@@ -159,7 +159,15 @@ export function OTPInput({
 
   useEffect(() => {
     if (status !== "error" || reduce || !slotsRef.current) return;
-    animate(slotsRef.current, { x: [0, -5, 5, -3, 3, -1, 0] }, { duration: 0.45, ease: EASE_OUT });
+    const controls = animate(
+      slotsRef.current,
+      { x: [0, -5, 5, -3, 3, -1, 0] },
+      { duration: 0.45, ease: EASE_OUT }
+    );
+    // Stop the animation on unmount instead of leaving it running against a
+    // detached node — a dialog can close (Cancel) mid-shake since this
+    // fires while the person is still typing a partial PIN.
+    return () => controls.stop();
   }, [status, reduce]);
 
   const activeIndex = focused ? active : -1;

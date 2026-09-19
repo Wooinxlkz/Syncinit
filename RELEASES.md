@@ -1,5 +1,33 @@
 # Releases
 
+## v0.1.11
+
+- **Found the actual cause of the .init icon showing the main app icon**:
+  `write_init_file_icon()` wrote next to the exe — fine for a dev build,
+  but a normal install lives under `C:\Program Files\Syncinit\`, which a
+  non-admin user can't write to. The write silently failed, and the code
+  fell back to using the exe itself (the main icon) as the DefaultIcon
+  target. That fallback was always the visible behavior on a real install;
+  it had nothing to do with icon caching or a stale build. Now writes to
+  `%LOCALAPPDATA%\Syncinit\`, which is always writable.
+- **Modal system rebuilt on Radix UI** (`@radix-ui/react-dialog`) instead
+  of the hand-rolled focus-trap — every dialog (Add to archive, password
+  prompt, Settings, Archive info) goes through it now. The freeze on
+  Cancel was traced to the old hand-rolled focus trap; rather than patch
+  around it further, swapped it for a widely-used, battle-tested
+  implementation. Also hardened `OTPInput`'s error-shake animation to stop
+  itself on unmount instead of potentially running against a detached
+  node — a plausible contributor if the dialog closed mid-shake.
+- **Add-to-archive dialog now animates its height to fit each tab**
+  (framer-motion `layout` on the panel) instead of either snapping
+  instantly or sitting at an oversized fixed height with dead space.
+- **Context-menu "opens the app but doesn't add files"**: went through
+  the whole launch-parsing path again and can't find a bug in it by
+  inspection. Added a `get_raw_args` command, logged to the devtools
+  console on startup (and the relaunch event payload is logged too) —
+  next time this happens, that console output will show exactly what
+  Explorer actually invoked, instead of guessing further blind.
+
 ## v0.1.10
 
 - **Context menu submenu items now have icons** ("Add to archive…", "Add

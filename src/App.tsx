@@ -221,6 +221,9 @@ export default function App() {
         invoke("debug_context_menu").then((info) =>
           console.log("Syncinit context menu registry state:", info)
         );
+        invoke("get_raw_args").then((argv) =>
+          console.log("Syncinit raw launch argv:", argv)
+        );
       });
     const closeMenu = () => setContextMenu(null);
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -233,6 +236,7 @@ export default function App() {
       if (action && action.mode !== "none") handleLaunchAction(action);
     });
     const unlistenRelaunch = listen<LaunchAction>("syncinit://relaunch-action", (event) => {
+      console.log("Syncinit relaunch-action received:", event.payload);
       handleLaunchAction(event.payload);
     });
     return () => {

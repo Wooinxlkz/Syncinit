@@ -68,6 +68,22 @@
   color: var(--ink);
 }
 
+/* Visually hidden but still announced by screen readers — used for the
+   Radix Dialog.Title/Description every modal needs for accessibility but
+   that we don't want to show twice (our own .modal-header already shows
+   the title visibly). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Themed scrollbars — WebView2 (this app's runtime on Windows) is Chromium,
    so the ::-webkit-scrollbar rules are what actually apply; scrollbar-color
    is there too for any non-Chromium context (e.g. previewing in a browser). */
@@ -225,25 +241,39 @@ tbody tr.selected {
 }
 
 /* ---- Modal (Add to archive) ----
-   Open/close motion now comes entirely from Modal.tsx's framer-motion
-   spring (ported from Xuro's Modal), so no CSS `animation` here anymore —
-   having both fight over opacity/transform on the same element was what
-   made these feel janky/wrong compared to Xuro's dialogs. `.modal` no
-   longer clips (`overflow: visible`) so an internal dropdown (format,
-   compression, locale, etc.) can open past the panel's edge instead of
-   being cut off; the rounded-corner look is kept by rounding the header
-   and footer individually instead of clipping the whole panel. */
+   Open/close motion comes entirely from Modal.tsx's framer-motion spring,
+   so no CSS `animation` here — having both fight over opacity/transform on
+   the same element was what made these feel janky/wrong compared to
+   Xuro's dialogs. `.modal` no longer clips (`overflow: visible`) so an
+   internal dropdown (format, compression, locale, etc.) can open past the
+   panel's edge instead of being cut off; the rounded-corner look is kept
+   by rounding the header and footer individually instead of clipping the
+   whole panel.
+
+   Radix renders Overlay and Content as *siblings*, not nested — so the
+   dim layer (.modal-backdrop) and the centering layer (.modal-layer) are
+   two separate elements now instead of one flex container wrapping the
+   card. .modal-layer covers the full viewport but has pointer-events:none
+   so a click in the empty space around the card falls through to the
+   Overlay underneath (closing the dialog); .modal itself turns pointer
+   events back on so clicks on the actual card work normally. */
 .modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(2px);
+  z-index: 50;
+}
+.modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 51;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 50;
+  pointer-events: none;
 }
-.modal-backdrop-top {
+.modal-layer-top {
   align-items: flex-start;
   padding-top: 64px;
 }
@@ -255,6 +285,10 @@ tbody tr.selected {
   border-radius: var(--radius-lg);
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
   overflow: visible;
+  pointer-events: auto;
+}
+.modal:focus-visible {
+  outline: none;
 }
 .modal-header {
   display: flex;
@@ -344,14 +378,15 @@ tbody tr.selected {
   gap: 12px;
   min-height: 190px;
 }
-/* Add-to-archive dialog: fixed body height instead of the generic
-   min-height above, so switching tabs (General/Advanced/Options/Comment —
-   each with a different natural content height) doesn't resize the whole
-   card around the person. Shorter tabs just leave the extra space empty;
-   a taller one (unlikely at this width) would scroll instead of growing. */
+/* Add-to-archive dialog: the modal panel now has framer-motion `layout`
+   (see Modal.tsx), which smoothly animates the whole card's height to
+   match whatever tab is showing instead of snapping — so the body just
+   sizes to its actual content (small min-height as a floor so a very
+   short tab, like a plain checkbox list, doesn't look cramped) rather
+   than a fixed height with dead space padded in under short tabs. */
 .add-archive-modal .modal-body {
-  height: 280px;
-  min-height: 0;
+  min-height: 160px;
+  max-height: min(60vh, 420px);
   overflow-y: auto;
 }
 
