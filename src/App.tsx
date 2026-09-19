@@ -6,7 +6,6 @@ import { confirm, open } from "@tauri-apps/plugin-dialog";
 // the console-flash the shell plugin's open() causes on Windows)
 import { api, formatBytes, type ArchiveSummary } from "./api";
 import { useI18n, SUPPORTED_LOCALES } from "./i18n";
-import { LocaleDropdown } from "./LocaleDropdown";
 import { MenuBar } from "./MenuBar";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
@@ -35,6 +34,7 @@ import {
 import AddArchiveDialog, { type ArchiveDialogResult } from "./AddArchiveDialog";
 import PasswordDialog from "./PasswordDialog";
 import { Modal } from "./Modal";
+import { SettingsModal } from "./Settings";
 import "./App.css";
 
 type LaunchAction =
@@ -113,7 +113,8 @@ export default function App() {
   const [filterText, setFilterText] = useState("");
   const [findOpen, setFindOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
-  const [aboutOpen, setAboutOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<"general" | "about">("general");
   const [dragActive, setDragActive] = useState(false);
   const [favorites, setFavorites] = useState<string[]>(() => {
     try {
@@ -463,11 +464,6 @@ export default function App() {
 
   return (
     <div className="app" onContextMenu={showContextMenu}>
-      <header className="titlebar">
-        <span className="app-name">{t("app.title")}</span>
-        <LocaleDropdown locale={locale} onChange={setLocale} />
-      </header>
-
       <MenuBar
         sections={[
           {
@@ -522,7 +518,16 @@ export default function App() {
           },
           {
             label: "Help",
-            items: [{ label: "About Syncinit", icon: HelpCircle, onSelect: () => setAboutOpen(true) }],
+            items: [
+              {
+                label: "About Syncinit",
+                icon: HelpCircle,
+                onSelect: () => {
+                  setSettingsPage("about");
+                  setSettingsOpen(true);
+                },
+              },
+            ],
           },
         ]}
       />
@@ -576,6 +581,13 @@ export default function App() {
             Cancel
           </button>
         )}
+        <button
+          className="icon-toolbar-btn icon-toolbar-btn-settings"
+          onClick={() => setSettingsOpen(true)}
+        >
+          <Settings size={20} strokeWidth={1.75} />
+          Settings
+        </button>
       </div>
 
       {findOpen && (
@@ -684,6 +696,16 @@ export default function App() {
         error={passwordError}
         purpose={passwordRequest?.purpose}
         onCancel={() => {
+          // Cancelling a PIN prompt for opening an archive should leave the
+          // app in a clean "nothing open" state, not a half-attempted one —
+          // this matters most when the cancelled attempt was for a
+          // *different* archive than whatever was already open/showing.
+          if (passwordRequest?.purpose === "open") {
+            setArchivePath(null);
+            setSummary(null);
+            setSelected(new Set());
+            setStatus(t("status.noArchive"));
+          }
           setPasswordRequest(null);
           setPasswordError("");
         }}
@@ -713,15 +735,14 @@ export default function App() {
         )}
       </SimpleModal>
 
-      <SimpleModal title="About Syncinit" open={aboutOpen} onClose={() => setAboutOpen(false)}>
-        <p style={{ margin: "0 0 8px", color: "var(--muted)" }}>
-          A fast, modern archive manager for Windows — a practical WinRAR alternative.
-        </p>
-        <p style={{ margin: 0, fontSize: 12, color: "var(--faint)" }}>
-          No telemetry, no network calls. See PRIVACY.md / TERMS.md / LICENSE in the install
-          folder for the full policies.
-        </p>
-      </SimpleModal>
+      <SettingsModal
+        open={settingsOpen}
+        page={settingsPage}
+        onPageChange={setSettingsPage}
+        onClose={() => setSettingsOpen(false)}
+        locale={locale}
+        onLocaleChange={setLocale}
+      />
     </div>
   );
 }

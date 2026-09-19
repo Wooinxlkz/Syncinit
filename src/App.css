@@ -41,35 +41,6 @@
   color: var(--ink);
 }
 
-.titlebar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-  -webkit-app-region: drag;
-}
-.app-name {
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  color: var(--ink);
-}
-.locale-select {
-  -webkit-app-region: no-drag;
-  background: var(--sunken);
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 3px 6px;
-  font-size: 12px;
-  transition: border-color 0.15s var(--ease-out), background 0.15s var(--ease-out);
-}
-.locale-select:hover {
-  background: var(--hover);
-  border-color: var(--faint);
-}
-
 .toolbar {
   display: flex;
   align-items: center;
@@ -450,46 +421,30 @@ tbody tr.selected {
 .password-modal {
   width: 360px;
 }
+.password-modal .modal-body {
+  min-height: 0;
+  align-items: center;
+  text-align: center;
+  padding: 20px 16px;
+}
+.password-modal .link-btn {
+  align-self: center;
+}
+.password-modal .field {
+  align-items: center;
+  width: 100%;
+}
+.password-modal .field input {
+  text-align: center;
+}
+.password-modal .field-error {
+  text-align: center;
+}
 .password-copy {
   margin: 0;
   color: var(--muted);
   font-size: 12.5px;
   line-height: 1.5;
-}
-
-.context-menu {
-  position: fixed;
-  z-index: 100;
-  min-width: 190px;
-  padding: 5px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
-  animation: contextIn 0.1s var(--ease-out);
-}
-@keyframes contextIn {
-  from { opacity: 0; transform: translateY(-3px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-.context-menu button {
-  display: block;
-  width: 100%;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--ink);
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-.context-menu button:hover:not(:disabled) {
-  background: var(--hover);
-}
-.context-menu button:disabled {
-  color: var(--faint);
-  cursor: default;
 }
 
 .link-btn {
@@ -544,75 +499,221 @@ tbody tr.selected {
   border-color: var(--faint, #64645f);
 }
 
-/* ---- Locale dropdown (matches Xuro's ContextMenu surface styling) ---- */
-.locale-dropdown {
-  position: relative;
+/* ---- Settings modal (General/About), ported structurally from Xuro's
+   SettingsModal.tsx: fixed-size sidebar nav + content pane with a page
+   transition, instead of a floating dropdown for locale. ---- */
+.settings-modal {
+  width: 640px;
+  height: 460px;
+  max-width: 92vw;
+  max-height: 86vh;
 }
-.locale-trigger {
-  -webkit-app-region: no-drag;
+.settings-body {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+}
+.settings-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 176px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--line);
+  background: var(--sunken);
+}
+.settings-sidebar-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: var(--panel, #151515);
-  color: var(--ink, #ebebe8);
-  border: 1px solid var(--line, #292927);
-  border-radius: var(--radius-sm, 6px);
-  padding: 3px 8px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color 0.15s var(--ease-out, ease), background 0.15s var(--ease-out, ease);
+  gap: 10px;
+  padding: 14px 14px 10px;
 }
-.locale-trigger:hover {
-  background: var(--hover);
-  border-color: var(--faint, #64645f);
+.settings-sidebar-header .icon-chip {
+  display: grid;
+  place-items: center;
+  height: 30px;
+  width: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--muted);
 }
-.locale-panel {
-  /* Motion (opacity/y/scale) comes entirely from LocaleDropdown.tsx's
-     framer-motion transition now — no CSS `animation` here, since running
-     both at once fought over the same properties and was the "broken"
-     open/close behavior. */
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 100;
-  min-width: 180px;
-  max-height: 280px;
-  overflow-y: auto;
-  border-radius: 8px;
-  border: 1px solid var(--line, #292927);
-  background: var(--bg, #1a1a1a);
-  padding: 4px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+.settings-sidebar-header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
 }
-.locale-option {
+.settings-sidebar-header p {
+  margin: 2px 0 0;
+  font-size: 10.5px;
+  color: var(--faint);
+}
+.settings-nav {
   display: flex;
-  width: 100%;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 10px;
+}
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.settings-nav-item:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.settings-nav-item.active {
+  background: var(--hover);
+  color: var(--ink);
+}
+.settings-sidebar-footer {
+  margin-top: auto;
+  padding: 12px 14px 14px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+.settings-sidebar-footer .settings-version {
+  margin-top: 6px;
+  font-family: var(--font-mono, monospace);
+}
+
+.settings-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+}
+.settings-content-header {
+  display: flex;
+  align-items: center;
+  height: 52px;
+  flex-shrink: 0;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-content-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.settings-content-header p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--faint);
+}
+.settings-content-header .icon-btn {
+  margin-left: auto;
+}
+.settings-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.settings-group-title {
+  margin: 0 0 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.settings-group-desc {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--faint);
+}
+.settings-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+.settings-row {
+  display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
   border: 0;
-  border-radius: 5px;
+  border-bottom: 1px solid var(--line);
   background: transparent;
-  color: var(--ink, #ebebe8);
+  color: var(--ink);
   font-size: 12.5px;
   text-align: left;
   cursor: pointer;
   transition: background 0.1s ease;
 }
-.locale-option:hover:not(:disabled) {
+.settings-row:last-child {
+  border-bottom: 0;
+}
+.settings-row:hover:not(:disabled) {
   background: var(--hover);
 }
-.locale-option[aria-selected="true"] {
-  background: var(--active);
-}
-.locale-option:disabled {
-  color: var(--faint, #64645f);
+.settings-row:disabled {
   cursor: default;
+  color: var(--faint);
 }
-.locale-option-soon {
+.settings-row-check {
+  color: var(--ink);
+}
+.settings-row-soon {
   font-size: 10px;
-  color: var(--faint, #64645f);
+  color: var(--faint);
+}
+
+/* About page, matching Xuro's About-settings card layout */
+.about-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.about-card img {
+  height: 40px;
+  width: 40px;
+  border-radius: var(--radius-sm);
+}
+.about-card-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.about-card-version {
+  margin-top: 2px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--faint);
+}
+.about-features {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.about-features li {
+  padding: 9px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
 }
 
 /* ---- In-app right-click menu (ContextMenu.tsx, ported from Xuro) ---- */
@@ -745,6 +846,9 @@ tbody tr.selected {
 }
 .icon-toolbar-btn.danger {
   color: var(--danger, #ff5c5c);
+}
+.icon-toolbar-btn-settings {
+  margin-left: auto;
 }
 
 /* ---- Find bar ---- */

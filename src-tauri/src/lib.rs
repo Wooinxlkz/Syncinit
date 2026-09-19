@@ -18,9 +18,14 @@ const INIT_FILE_ICON: &[u8] = include_bytes!("../icons/filetype/init-file.ico");
 fn write_init_file_icon(exe: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
     let dir = exe.parent().unwrap_or(std::path::Path::new("."));
     let ico_path = dir.join("init-file.ico");
-    if !ico_path.exists() {
-        std::fs::write(&ico_path, INIT_FILE_ICON)?;
-    }
+    // Always overwrite with whatever's embedded in *this* build. The old
+    // `if !ico_path.exists()` guard here meant an upgrade with the same
+    // install path never replaced an icon written by an earlier version —
+    // exactly the "new logo isn't showing up" symptom, since the file on
+    // disk (and thus the registry's DefaultIcon target) was frozen at
+    // whatever the very first install wrote. A plain overwrite is cheap
+    // (a few KB) and Explorer picks up the new bytes at the same path fine.
+    std::fs::write(&ico_path, INIT_FILE_ICON)?;
     Ok(ico_path)
 }
 
@@ -91,21 +96,33 @@ fn register_context_menu() -> Result<bool, String> {
         cleanup_legacy_registrations();
 
         // Idempotency check: skip the ~40 registry writes below entirely if
-        // they already point at this exact exe path (e.g. every app launch,
-        // not just the first). This — plus writing directly via the Win32
-        // registry API instead of spawning `reg.exe` per value, which was
-        // both flashing a console window each time (no window station to
-        // attach a new console to without CREATE_NO_WINDOW) and adding real
-        // process-spawn overhead 40+ times over — is what was causing the
-        // freeze and the console flicker on every startup.
+        // they already point at this exact exe path *and* were written by
+        // this same build. Gating on version (not just the exe path) matters
+        // because this function also rewrites the .init file icon and the
+        // menu's Icon/MUIVerb values — on an upgrade that installs to the
+        // same path, the old path-only check saw an identical command string
+        // and returned early forever, so a new release's icon/menu changes
+        // never actually reached the registry. This — plus writing directly
+        // via the Win32 registry API instead of spawning `reg.exe` per
+        // value, which was both flashing a console window each time (no
+        // window station to attach a new console to without
+        // CREATE_NO_WINDOW) and adding real process-spawn overhead 40+
+        // times over — is what was causing the freeze and the console
+        // flicker on every startup.
+        const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        if let Ok(existing) = hkcu
+        let up_to_date = hkcu
             .open_subkey("Software\\Classes\\*\\shell\\Syncinit\\shell\\01_add\\command")
             .and_then(|k| k.get_value::<String, _>(""))
-        {
-            if existing == format!("{exe_quoted} --add %*") {
-                return Ok(true);
-            }
+            .map(|existing| existing == format!("{exe_quoted} --add %*"))
+            .unwrap_or(false)
+            && hkcu
+                .open_subkey("Software\\Classes\\*\\shell\\Syncinit")
+                .and_then(|k| k.get_value::<String, _>("SyncinitVersion"))
+                .map(|v| v == APP_VERSION)
+                .unwrap_or(false);
+        if up_to_date {
+            return Ok(true);
         }
 
         for root in ["Software\\Classes\\*", "Software\\Classes\\Directory"] {
@@ -114,6 +131,10 @@ fn register_context_menu() -> Result<bool, String> {
             set_reg_value(&menu, "Icon", &format!("{exe_str},0")).map_err(|e| e.to_string())?;
             set_reg_value(&menu, "MultiSelectModel", "Player").map_err(|e| e.to_string())?;
             set_reg_value(&menu, "SubCommands", "").map_err(|e| e.to_string())?;
+            // Marker this idempotency check reads back above — only ever
+            // written on the "*" root's key (the one the check reads), but
+            // harmless to set on both since it's the same literal value.
+            set_reg_value(&menu, "SyncinitVersion", APP_VERSION).map_err(|e| e.to_string())?;
 
             // Only meaningful for actual files (not folders): "Open" and
             // "Extract Here" inside the SAME Syncinit submenu, restricted to

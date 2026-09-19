@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Format } from "./api";
 import { OTPInput } from "./OTPInput";
 import { Modal } from "./Modal";
+import { RadioGroup, RadioGroupItem } from "./RadioGroup";
 
 export interface ArchiveDialogResult {
   name: string;
@@ -33,7 +34,7 @@ const TABS: { id: Tab; label: string }[] = [
 export default function AddArchiveDialog({ open, defaultName, onCancel, onConfirm }: Props) {
   const [tab, setTab] = useState<Tab>("general");
   const [name, setName] = useState(defaultName);
-  const [format, setFormat] = useState<Format>("zip");
+  const [format, setFormat] = useState<Format>("init");
   const [level, setLevel] = useState(6);
   const [pinEnabled, setPinEnabled] = useState(false);
   const [pin, setPin] = useState("");
@@ -49,7 +50,7 @@ export default function AddArchiveDialog({ open, defaultName, onCancel, onConfir
     if (!open) return;
     setTab("general");
     setName(defaultName);
-    setFormat("zip");
+    setFormat("init");
     setLevel(6);
     setPinEnabled(false);
     setPin("");
@@ -104,32 +105,33 @@ export default function AddArchiveDialog({ open, defaultName, onCancel, onConfir
               <input value={name} onChange={(e) => setName(e.target.value)} />
             </label>
 
-            <div className="field-row">
-              <fieldset className="fieldset">
-                <legend>Archive format</legend>
+            <div className="field">
+              <span>Archive format</span>
+              <RadioGroup
+                value={format}
+                onValueChange={(v) => setFormat(v as Format)}
+                orientation="horizontal"
+              >
                 {(["init", "zip", "tar", "targz", "tarzst"] as Format[]).map((f) => (
-                  <label key={f} className="radio">
-                    <input
-                      type="radio"
-                      checked={format === f}
-                      onChange={() => setFormat(f)}
-                    />
-                    {f === "init" ? "SYNCINIT (.INIT)" : f.toUpperCase()}
-                  </label>
+                  <RadioGroupItem
+                    key={f}
+                    value={f}
+                    label={f === "init" ? "SYNCINIT (.INIT)" : f.toUpperCase()}
+                  />
                 ))}
-              </fieldset>
-
-              <label className="field">
-                <span>Compression level ({level === 0 ? "Store" : level})</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={9}
-                  value={level}
-                  onChange={(e) => setLevel(Number(e.target.value))}
-                />
-              </label>
+              </RadioGroup>
             </div>
+
+            <label className="field">
+              <span>Compression level ({level === 0 ? "Store" : level})</span>
+              <input
+                type="range"
+                min={0}
+                max={9}
+                value={level}
+                onChange={(e) => setLevel(Number(e.target.value))}
+              />
+            </label>
           </>
         )}
 

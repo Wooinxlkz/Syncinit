@@ -1,5 +1,43 @@
 # Releases
 
+## v0.1.9
+
+- **Removed the in-app titlebar** ("Zarc" text + the language dropdown) —
+  it was fully redundant with the OS titlebar and MenuBar's own drag
+  region, so it's just gone rather than patched. Confirmed (again) the
+  source has zero occurrences of "Zarc" anywhere; if it's still showing up
+  visually, that screenshot is from an old installed build, not this one —
+  see the icon/registry fix below for the actual reason an upgrade could
+  look like nothing changed.
+- **New Settings** (gear icon, bottom-right of the toolbar) replacing the
+  old titlebar dropdown and the standalone About dialog — sidebar nav +
+  content pane, structurally ported from Xuro's own `SettingsModal.tsx`.
+  General page holds language; About page holds the app info, in Xuro's
+  card layout.
+- **Default archive format is now SYNCINIT (.INIT)**, not ZIP. The format
+  picker in Add-to-archive is now the actual beui.dev/Xuro `RadioGroup`
+  (shared-layout dot glide + press spring), ported from Tailwind to this
+  project's plain CSS.
+- **Found the real reason an upgrade could look like it changed nothing**:
+  `register_context_menu()`'s idempotency check only compared the
+  registered exe *path* — on an upgrade installed to the same path, that
+  check matched immediately and skipped every write below it, including
+  the `.init` file-icon refresh and the menu's Icon/MUIVerb values, no
+  matter what changed in the new build. It now also checks a stored
+  version marker, so a version bump always re-registers. Separately,
+  `write_init_file_icon()` had `if !ico_path.exists()` — meaning even
+  when re-registration *did* run, an icon file already on disk from an
+  older install was never replaced. Both fixed: this is what "new logo
+  doesn't show up" and "still looks like the old version after updating"
+  actually were.
+- **PIN dialog cancel now actually closes out**: cancelling the PIN
+  prompt while opening an archive resets to a clean "no archive open"
+  state instead of leaving things ambiguous.
+- **PIN dialog spacing fixed** — it was inheriting the Add-to-archive
+  dialog's 190px `min-height` (sized for that dialog's tabs), which is
+  where the large empty gap under the PIN boxes came from. Password
+  dialog now sizes to its own content and centers it.
+
 ## v0.1.8
 
 - **Dialogs rebuilt to match Xuro's UI**: Add-to-archive, the PIN/password
