@@ -7,19 +7,21 @@ interface Props {
   error?: string;
   purpose?: "open" | "extract";
   onCancel: () => void;
-  onSubmit: (password: string) => void;
+  onSubmit: (password: string, remember: boolean) => void;
 }
 
 export default function PasswordDialog({ open, error, purpose = "open", onCancel, onSubmit }: Props) {
   const [mode, setMode] = useState<"pin" | "password">("pin");
   const [pin, setPin] = useState("");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setMode("pin");
     setPin("");
     setPassword("");
+    setRemember(false);
   }, [open]);
 
   return (
@@ -41,7 +43,7 @@ export default function PasswordDialog({ open, error, purpose = "open", onCancel
             length={6}
             value={pin}
             onChange={setPin}
-            onComplete={onSubmit}
+            onComplete={(value) => onSubmit(value, remember)}
             status={error ? "error" : "idle"}
             errorMessage={error}
             autoFocus
@@ -69,6 +71,11 @@ export default function PasswordDialog({ open, error, purpose = "open", onCancel
             ? "This archive uses a full password instead"
             : "This archive uses a PIN instead"}
         </button>
+
+        <label className="checkbox">
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+          Remember this password (stored in Windows Credential Manager, not on disk)
+        </label>
       </div>
       <div className="modal-footer">
         <button className="btn-secondary" type="button" onClick={onCancel}>
@@ -77,7 +84,7 @@ export default function PasswordDialog({ open, error, purpose = "open", onCancel
         <button
           className="btn-primary"
           type="button"
-          onClick={() => onSubmit(mode === "pin" ? pin : password)}
+          onClick={() => onSubmit(mode === "pin" ? pin : password, remember)}
           disabled={mode === "pin" ? pin.length < 6 : password.length === 0}
         >
           Unlock

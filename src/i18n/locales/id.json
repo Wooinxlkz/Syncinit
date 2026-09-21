@@ -1,0 +1,22 @@
+{
+  "app.title": "Syncinit",
+  "toolbar.add": "Tambah",
+  "toolbar.extract": "Ekstrak",
+  "toolbar.test": "Uji",
+  "toolbar.delete": "Hapus",
+  "toolbar.info": "Info",
+  "table.name": "Nama",
+  "table.size": "Ukuran",
+  "table.compressed": "Terkompresi",
+  "table.ratio": "Rasio",
+  "table.modified": "Diubah",
+  "status.noArchive": "Tidak ada arsip terbuka — seret file atau klik Tambah",
+  "status.entries": "{count} objek, {size} total",
+  "status.encrypted": "Terenkripsi",
+  "dialog.password": "Masukkan kata sandi",
+  "dialog.cancel": "Batal",
+  "dialog.ok": "OK",
+  "toast.testPassed": "Semua file lolos uji integritas",
+  "toast.testFailed": "Pemeriksaan integritas gagal untuk: {name}",
+  "toast.extracted": "{count} file diekstrak ke {dest}"
+}

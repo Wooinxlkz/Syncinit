@@ -1,0 +1,22 @@
+{
+  "app.title": "Syncinit",
+  "toolbar.add": "Добавить",
+  "toolbar.extract": "Извлечь",
+  "toolbar.test": "Проверить",
+  "toolbar.delete": "Удалить",
+  "toolbar.info": "Инфо",
+  "table.name": "Имя",
+  "table.size": "Размер",
+  "table.compressed": "Сжато",
+  "table.ratio": "Коэффициент",
+  "table.modified": "Изменён",
+  "status.noArchive": "Архив не открыт — перетащите файл или нажмите «Добавить»",
+  "status.entries": "{count} объектов, всего {size}",
+  "status.encrypted": "Зашифровано",
+  "dialog.password": "Введите пароль",
+  "dialog.cancel": "Отмена",
+  "dialog.ok": "ОК",
+  "toast.testPassed": "Все файлы прошли проверку целостности",
+  "toast.testFailed": "Проверка целостности не пройдена для: {name}",
+  "toast.extracted": "Извлечено {count} файлов в {dest}"
+}

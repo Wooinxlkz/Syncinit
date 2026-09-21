@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invokeSafe";
 
 export type Format = "init" | "zip" | "tar" | "targz" | "tarxz" | "tarzst" | "tarbz2" | "sevenz" | "rar";
 
@@ -58,6 +58,12 @@ export const api = {
     }),
   cancelOperation: () => invoke<void>("cancel_operation"),
   detectFormat: (path: string) => invoke<string | null>("detect_format", { path }),
+  // OS credential store (Windows Credential Manager) — opt-in via the
+  // "Remember this password" checkbox on the unlock dialog. Syncinit
+  // never writes the password itself to disk; Windows' own store does.
+  savePassword: (path: string, password: string) => invoke<void>("save_archive_password", { path, password }),
+  getSavedPassword: (path: string) => invoke<string | null>("get_saved_archive_password", { path }),
+  forgetPassword: (path: string) => invoke<void>("forget_archive_password", { path }),
 };
 
 export function formatBytes(bytes: number): string {

@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from "motion/react";
 import { Download, X } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invokeSafe";
 import { EASE_OUT } from "./ease";
 import type { UpdateInfo } from "./updateCheck";
 

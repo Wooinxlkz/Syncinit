@@ -1,0 +1,22 @@
+{
+  "app.title": "Syncinit",
+  "toolbar.add": "إضافة",
+  "toolbar.extract": "استخراج",
+  "toolbar.test": "اختبار",
+  "toolbar.delete": "حذف",
+  "toolbar.info": "معلومات",
+  "table.name": "الاسم",
+  "table.size": "الحجم",
+  "table.compressed": "مضغوط",
+  "table.ratio": "النسبة",
+  "table.modified": "التعديل",
+  "status.noArchive": "لا يوجد أرشيف مفتوح — اسحب ملفًا أو انقر على إضافة",
+  "status.entries": "{count} عنصر، بإجمالي {size}",
+  "status.encrypted": "مشفّر",
+  "dialog.password": "أدخل كلمة المرور",
+  "dialog.cancel": "إلغاء",
+  "dialog.ok": "موافق",
+  "toast.testPassed": "اجتازت جميع الملفات اختبار السلامة",
+  "toast.testFailed": "فشل فحص السلامة لـ: {name}",
+  "toast.extracted": "تم استخراج {count} ملفًا إلى {dest}"
+}

@@ -1,0 +1,22 @@
+{
+  "app.title": "Syncinit",
+  "toolbar.add": "Dodaj",
+  "toolbar.extract": "Wypakuj",
+  "toolbar.test": "Testuj",
+  "toolbar.delete": "Usuń",
+  "toolbar.info": "Informacje",
+  "table.name": "Nazwa",
+  "table.size": "Rozmiar",
+  "table.compressed": "Skompresowany",
+  "table.ratio": "Współczynnik",
+  "table.modified": "Zmodyfikowano",
+  "status.noArchive": "Brak otwartego archiwum — przeciągnij plik lub kliknij Dodaj",
+  "status.entries": "{count} obiektów, {size} łącznie",
+  "status.encrypted": "Zaszyfrowane",
+  "dialog.password": "Wprowadź hasło",
+  "dialog.cancel": "Anuluj",
+  "dialog.ok": "OK",
+  "toast.testPassed": "Wszystkie pliki przeszły test integralności",
+  "toast.testFailed": "Kontrola integralności nie powiodła się dla: {name}",
+  "toast.extracted": "Wypakowano {count} plików do {dest}"
+}

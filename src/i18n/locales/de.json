@@ -1,0 +1,22 @@
+{
+  "app.title": "Syncinit",
+  "toolbar.add": "Hinzufügen",
+  "toolbar.extract": "Extrahieren",
+  "toolbar.test": "Testen",
+  "toolbar.delete": "Löschen",
+  "toolbar.info": "Info",
+  "table.name": "Name",
+  "table.size": "Größe",
+  "table.compressed": "Komprimiert",
+  "table.ratio": "Verhältnis",
+  "table.modified": "Geändert",
+  "status.noArchive": "Kein Archiv geöffnet — Datei ablegen oder auf Hinzufügen klicken",
+  "status.entries": "{count} Objekte, {size} insgesamt",
+  "status.encrypted": "Verschlüsselt",
+  "dialog.password": "Passwort eingeben",
+  "dialog.cancel": "Abbrechen",
+  "dialog.ok": "OK",
+  "toast.testPassed": "Alle Dateien haben den Integritätstest bestanden",
+  "toast.testFailed": "Integritätsprüfung fehlgeschlagen für: {name}",
+  "toast.extracted": "{count} Dateien nach {dest} extrahiert"
+}

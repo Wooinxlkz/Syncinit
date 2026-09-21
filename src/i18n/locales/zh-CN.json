@@ -1,0 +1,22 @@
+{
+  "app.title": "Syncinit",
+  "toolbar.add": "添加",
+  "toolbar.extract": "解压",
+  "toolbar.test": "测试",
+  "toolbar.delete": "删除",
+  "toolbar.info": "信息",
+  "table.name": "名称",
+  "table.size": "大小",
+  "table.compressed": "压缩后",
+  "table.ratio": "压缩率",
+  "table.modified": "修改时间",
+  "status.noArchive": "未打开任何压缩包 — 拖放文件或点击“添加”",
+  "status.entries": "{count} 个对象，共 {size}",
+  "status.encrypted": "已加密",
+  "dialog.password": "输入密码",
+  "dialog.cancel": "取消",
+  "dialog.ok": "确定",
+  "toast.testPassed": "所有文件均通过完整性测试",
+  "toast.testFailed": "完整性检查失败：{name}",
+  "toast.extracted": "已将 {count} 个文件解压到 {dest}"
+}

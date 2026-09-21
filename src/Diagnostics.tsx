@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Copy, Check, RefreshCw, Wrench, Trash2 } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invokeSafe";
 import { version as APP_VERSION } from "../package.json";
 
 /**

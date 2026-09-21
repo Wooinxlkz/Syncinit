@@ -1,6 +1,6 @@
 [package]
 name = "syncinit"
-version = "0.1.14"
+version = "0.1.16"
 description = "Syncinit — a fast, modern archive manager (WinRAR alternative) built in Rust + Tauri"
 edition = "2021"
 authors = ["Ch. Abdelkrim"]
@@ -18,6 +18,11 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
+# OS credential store (Windows Credential Manager) for the optional
+# "remember this password" feature — passwords are never written to disk
+# in plaintext by Syncinit itself; this hands them to Windows' own secure
+# store and only ever holds a reference (the archive's path) locally.
+keyring = "4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Opens the update banner's "View release" link. Not @tauri-apps/plugin-shell's

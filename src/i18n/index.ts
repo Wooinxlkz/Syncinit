@@ -1,22 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 
 // One JSON file per locale under ./locales/<code>.json, loaded on demand via
-// dynamic import so adding a translated locale later is just: drop the file
-// here, flip `ready` to true below — no other code changes. Only en.json
-// exists right now.
+// dynamic import. All 12 are translated now (20 keys each, everything the
+// UI currently has strings for) — Arabic is translated but the app layout
+// itself isn't RTL-aware yet (no dir="rtl" flip), so Arabic text reads
+// correctly but the overall toolbar/panel layout stays left-to-right.
 export const SUPPORTED_LOCALES = [
   { code: "en", label: "English", ready: true },
-  { code: "fr", label: "Français", ready: false },
-  { code: "de", label: "Deutsch", ready: false },
-  { code: "es", label: "Español", ready: false },
-  { code: "nl", label: "Nederlands", ready: false },
-  { code: "no", label: "Norsk", ready: false },
-  { code: "pl", label: "Polski", ready: false },
-  { code: "ru", label: "Русский", ready: false },
-  { code: "ar", label: "العربية", ready: false },
-  { code: "id", label: "Bahasa Indonesia", ready: false },
-  { code: "zh-CN", label: "中文(简体)", ready: false },
-  { code: "ja", label: "日本語", ready: false },
+  { code: "fr", label: "Français", ready: true },
+  { code: "de", label: "Deutsch", ready: true },
+  { code: "es", label: "Español", ready: true },
+  { code: "nl", label: "Nederlands", ready: true },
+  { code: "no", label: "Norsk", ready: true },
+  { code: "pl", label: "Polski", ready: true },
+  { code: "ru", label: "Русский", ready: true },
+  { code: "ar", label: "العربية", ready: true },
+  { code: "id", label: "Bahasa Indonesia", ready: true },
+  { code: "zh-CN", label: "中文(简体)", ready: true },
+  { code: "ja", label: "日本語", ready: true },
 ] as const;
 
 type Dict = Record<string, string>;

@@ -1,0 +1,22 @@
+{
+  "app.title": "Syncinit",
+  "toolbar.add": "Legg til",
+  "toolbar.extract": "Pakk ut",
+  "toolbar.test": "Test",
+  "toolbar.delete": "Slett",
+  "toolbar.info": "Info",
+  "table.name": "Navn",
+  "table.size": "Størrelse",
+  "table.compressed": "Komprimert",
+  "table.ratio": "Forhold",
+  "table.modified": "Endret",
+  "status.noArchive": "Ingen arkiv åpnet — dra en fil hit eller klikk Legg til",
+  "status.entries": "{count} objekter, {size} totalt",
+  "status.encrypted": "Kryptert",
+  "dialog.password": "Skriv inn passord",
+  "dialog.cancel": "Avbryt",
+  "dialog.ok": "OK",
+  "toast.testPassed": "Alle filer besto integritetstesten",
+  "toast.testFailed": "Integritetskontroll mislyktes for: {name}",
+  "toast.extracted": "{count} filer pakket ut til {dest}"
+}

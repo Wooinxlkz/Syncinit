@@ -591,9 +591,64 @@ async fn change_archive_password(
     .map_err(|e| e.to_string())?
 }
 
+const KEYRING_SERVICE: &str = "Syncinit Archive Password";
+
+/// Canonicalizing the path before using it as the credential's account
+/// name means a password saved for one relative/symlinked route to a file
+/// is still found via another. Falls back to the raw path if canonicalize
+/// fails (a network path with permission quirks, say) rather than
+/// blocking the save entirely — worst case the key is just a little more
+/// fragile to a later rename, not broken.
+fn keyring_entry_for(path: &str) -> Result<keyring::Entry, String> {
+    let key = std::fs::canonicalize(path)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path.to_string());
+    keyring::Entry::new(KEYRING_SERVICE, &key).map_err(|e| e.to_string())
+}
+
+/// Saves a password/PIN to the OS credential store (Windows Credential
+/// Manager) for this archive — opt-in only, via the "Remember this
+/// password" checkbox on the unlock dialog. Syncinit itself never writes
+/// the password to disk in plaintext; this hands it to Windows' own
+/// secure store and only ever keeps the archive's path as a lookup key.
 #[tauri::command]
-async fn extract_archive(
-    app: tauri::AppHandle,
+async fn save_archive_password(path: String, password: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        keyring_entry_for(&path)?.set_password(&password).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Returns the saved password if one exists — `Ok(None)` (not an error)
+/// when there's simply nothing saved for this archive yet, which is the
+/// normal case for any archive the person hasn't opted into remembering.
+#[tauri::command]
+async fn get_saved_archive_password(path: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || match keyring_entry_for(&path)?.get_password() {
+        Ok(pw) => Ok(Some(pw)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Removes a saved password — called when the person unchecks "remember"
+/// after previously saving one, when a saved password turns out to be
+/// stale (archive's password changed elsewhere), or when password
+/// protection is removed from the archive entirely. `NoEntry` isn't an
+/// error here: "nothing to forget" is a successful no-op, not a failure.
+#[tauri::command]
+async fn forget_archive_password(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || match keyring_entry_for(&path)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
     state: tauri::State<'_, CancelState>,
     path: String,
     destination: String,
@@ -788,6 +843,9 @@ pub fn run() {
             delete_sources,
             delete_entries,
             change_archive_password,
+            save_archive_password,
+            get_saved_archive_password,
+            forget_archive_password,
             extract_archive,
             test_archive,
             detect_format,

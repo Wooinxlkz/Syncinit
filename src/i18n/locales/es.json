@@ -1,0 +1,22 @@
+{
+  "app.title": "Syncinit",
+  "toolbar.add": "Añadir",
+  "toolbar.extract": "Extraer",
+  "toolbar.test": "Probar",
+  "toolbar.delete": "Eliminar",
+  "toolbar.info": "Info",
+  "table.name": "Nombre",
+  "table.size": "Tamaño",
+  "table.compressed": "Comprimido",
+  "table.ratio": "Ratio",
+  "table.modified": "Modificado",
+  "status.noArchive": "Ningún archivo abierto — arrastra un archivo o haz clic en Añadir",
+  "status.entries": "{count} objetos, {size} en total",
+  "status.encrypted": "Cifrado",
+  "dialog.password": "Introduce la contraseña",
+  "dialog.cancel": "Cancelar",
+  "dialog.ok": "Aceptar",
+  "toast.testPassed": "Todos los archivos superaron la prueba de integridad",
+  "toast.testFailed": "Fallo en la comprobación de integridad de: {name}",
+  "toast.extracted": "{count} archivos extraídos a {dest}"
+}

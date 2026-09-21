@@ -1,5 +1,50 @@
 # Releases
 
+## v0.1.16
+
+New feature (from the "what's worth adding" discussion) — first of the
+recommended three, chosen as the cheapest/highest-leverage one to start
+with since it extends something already built rather than adding a new
+subsystem:
+
+- **"Remember this password"** on the unlock dialog (opt-in, unchecked by
+  default). Saves to the Windows Credential Manager via the `keyring`
+  crate — Syncinit itself never writes the password to disk in plaintext,
+  only a reference (the archive's path) is ever handled locally. When a
+  saved password exists, opening that archive tries it silently first;
+  if it's gone stale (password changed elsewhere), it's dropped and a
+  normal prompt appears — no visible glitch either way. Changing or
+  removing an archive's password (Commands → "Set/change password…")
+  always clears whatever was saved for it, so a stale credential can't
+  linger. Fully additive: an archive with nothing saved for it behaves
+  exactly as before.
+
+## v0.1.15
+
+- **Dialog resizing: gave up on "smart" and made it fixed.** Three rounds
+  of adaptive sizing (min-height, then framer-motion `layout`) kept
+  getting reported as visibly resizing between tabs. Switched to what
+  WinRAR's own dialog actually does: one fixed height (300px), nothing to
+  animate, nothing to mismeasure. Every tab's content fits inside it with
+  room to spare.
+- **Freeze: added a real safety net, since I couldn't find the exact
+  cause by reading code a fourth time.** Every Tauri command call now
+  goes through a timeout wrapper — heavy archive operations get a
+  generous 10-minute ceiling (real large archives can legitimately take
+  a while), everything else gets 20 seconds. If any single call ever
+  hangs without resolving *or* rejecting — which is exactly what a
+  permanently-stuck `busy` state and "have to restart the app" looks
+  like — it now fails loudly instead of hanging forever, so the calling
+  code's own cleanup still runs and the UI recovers on its own. This
+  doesn't pretend to know the root cause; it makes the failure mode
+  survivable regardless of what it turns out to be.
+- **All 12 languages are now actually translated** — French, German,
+  Spanish, Dutch, Norwegian, Polish, Russian, Arabic, Indonesian, Chinese
+  (Simplified), and Japanese, all 20 UI strings each. One honest caveat:
+  Arabic text itself is correctly translated, but the app's layout isn't
+  RTL-aware yet (no right-to-left flip), so the toolbar and panels stay
+  left-to-right even when Arabic is selected.
+
 ## v0.1.14
 
 Took the "check open source, use what's there" instruction seriously —

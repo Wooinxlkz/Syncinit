@@ -1,5 +1,5 @@
 import { useEffect, useState, type MouseEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invokeSafe";
 import { listen } from "@tauri-apps/api/event";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
 // (no plugin-shell import — reveal_in_file_manager on the Rust side avoids
@@ -296,10 +296,23 @@ export default function App() {
     }
   }
 
-  async function loadArchive(path: string, password?: string) {
+  async function loadArchive(path: string, password?: string, remember?: boolean) {
     setBusy(true);
+    // If no password was explicitly given, try a saved one first (opt-in,
+    // only exists if the person previously checked "Remember this
+    // password") — transparent when it works, falls through to a normal
+    // prompt when it doesn't, same as if nothing had been saved at all.
+    let pw = password;
+    let usedSaved = false;
+    if (pw === undefined) {
+      const saved = await api.getSavedPassword(path).catch(() => null);
+      if (saved) {
+        pw = saved;
+        usedSaved = true;
+      }
+    }
     try {
-      const data = await api.listArchive(path, password);
+      const data = await api.listArchive(path, pw);
       setArchivePath(path);
       setSummary(data);
       setSelected(new Set());
@@ -313,8 +326,18 @@ export default function App() {
         localStorage.setItem("syncinit:favorites", JSON.stringify(next));
         return next;
       });
+      if (remember && pw) {
+        await api.savePassword(path, pw).catch(() => {});
+      }
     } catch (err) {
       if (isPasswordError(err)) {
+        if (usedSaved) {
+          // Saved password no longer works (changed elsewhere) — drop it
+          // rather than keep silently retrying a stale credential, and
+          // prompt fresh with no "incorrect password" alarm since the
+          // person never actually typed anything wrong themselves.
+          await api.forgetPassword(path).catch(() => {});
+        }
         setPasswordRequest({ path, purpose: "open" });
         setPasswordError(password ? "Incorrect password. Try again." : "");
       } else {
@@ -386,13 +409,16 @@ export default function App() {
     setDialogSources(Array.isArray(files) ? files : [files]);
   }
 
-  async function extractTo(source: string, destination: string, password?: string) {
+  async function extractTo(source: string, destination: string, password?: string, remember?: boolean) {
     setBusy(true);
     setProgress(null);
     try {
       const { count, warnings } = await api.extractArchive(source, destination, password);
       setPasswordRequest(null);
       setPasswordError("");
+      if (remember && password) {
+        await api.savePassword(source, password).catch(() => {});
+      }
       // Extraction still completes with everything that *was* readable —
       // these are entries that weren't (corrupt, unsafe path, I/O error),
       // shown as a warning rather than a silent gap or a hard failure.
@@ -422,13 +448,13 @@ export default function App() {
     if (destination) await extractTo(archivePath, destination as string);
   }
 
-  async function submitPassword(password: string) {
+  async function submitPassword(password: string, remember: boolean) {
     if (!passwordRequest) return;
     const request = passwordRequest;
     if (request.purpose === "open") {
-      await loadArchive(request.path, password);
+      await loadArchive(request.path, password, remember);
     } else if (request.destination) {
-      await extractTo(request.path, request.destination, password);
+      await extractTo(request.path, request.destination, password, remember);
     }
   }
 
@@ -794,6 +820,11 @@ export default function App() {
         onSubmit={async (oldPassword, newPassword) => {
           if (!archivePath) return;
           await api.changeArchivePassword(archivePath, oldPassword, newPassword);
+          // Whatever was saved (if anything) was for the password that
+          // just changed or got removed — always stale now regardless of
+          // which happened, so clear it rather than leave a credential
+          // around that silently stops matching.
+          await api.forgetPassword(archivePath).catch(() => {});
           setPasswordChangeOpen(false);
           setStatus(newPassword ? "Password updated." : "Password protection removed.");
           await loadArchive(archivePath, newPassword);

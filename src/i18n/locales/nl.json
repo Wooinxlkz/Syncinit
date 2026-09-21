@@ -1,0 +1,22 @@
+{
+  "app.title": "Syncinit",
+  "toolbar.add": "Toevoegen",
+  "toolbar.extract": "Uitpakken",
+  "toolbar.test": "Testen",
+  "toolbar.delete": "Verwijderen",
+  "toolbar.info": "Info",
+  "table.name": "Naam",
+  "table.size": "Grootte",
+  "table.compressed": "Gecomprimeerd",
+  "table.ratio": "Verhouding",
+  "table.modified": "Gewijzigd",
+  "status.noArchive": "Geen archief geopend — sleep een bestand of klik op Toevoegen",
+  "status.entries": "{count} objecten, {size} totaal",
+  "status.encrypted": "Versleuteld",
+  "dialog.password": "Wachtwoord invoeren",
+  "dialog.cancel": "Annuleren",
+  "dialog.ok": "OK",
+  "toast.testPassed": "Alle bestanden zijn geslaagd voor de integriteitstest",
+  "toast.testFailed": "Integriteitscontrole mislukt voor: {name}",
+  "toast.extracted": "{count} bestanden uitgepakt naar {dest}"
+}

@@ -1,0 +1,22 @@
+{
+  "app.title": "Syncinit",
+  "toolbar.add": "追加",
+  "toolbar.extract": "展開",
+  "toolbar.test": "テスト",
+  "toolbar.delete": "削除",
+  "toolbar.info": "情報",
+  "table.name": "名前",
+  "table.size": "サイズ",
+  "table.compressed": "圧縮後",
+  "table.ratio": "圧縮率",
+  "table.modified": "更新日時",
+  "status.noArchive": "アーカイブが開かれていません — ファイルをドラッグするか「追加」をクリック",
+  "status.entries": "{count} 個のオブジェクト、合計 {size}",
+  "status.encrypted": "暗号化済み",
+  "dialog.password": "パスワードを入力",
+  "dialog.cancel": "キャンセル",
+  "dialog.ok": "OK",
+  "toast.testPassed": "すべてのファイルが整合性テストに合格しました",
+  "toast.testFailed": "整合性チェックに失敗しました: {name}",
+  "toast.extracted": "{count} 個のファイルを {dest} に展開しました"
+}
