@@ -649,6 +649,9 @@ async fn forget_archive_password(path: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn extract_archive(
+    app: tauri::AppHandle,
     state: tauri::State<'_, CancelState>,
     path: String,
     destination: String,
