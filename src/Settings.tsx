@@ -1,12 +1,13 @@
 import { AnimatePresence, motion } from "motion/react";
-import { X, Globe, Info, Package, Sun, Moon } from "lucide-react";
+import { X, Globe, Info, Package, Sun, Moon, Bug } from "lucide-react";
 import { Modal } from "./Modal";
 import { EASE_OUT } from "./ease";
 import { SUPPORTED_LOCALES } from "./i18n";
+import { Diagnostics } from "./Diagnostics";
 import appIcon from "../src-tauri/icons/128x128.png";
 import { version as APP_VERSION } from "../package.json";
 
-export type SettingsPage = "general" | "about";
+export type SettingsPage = "general" | "about" | "diagnostics";
 export type Theme = "dark" | "light";
 
 interface Props {
@@ -23,11 +24,16 @@ interface Props {
 const NAV: { id: SettingsPage; label: string; icon: typeof Globe }[] = [
   { id: "general", label: "General", icon: Globe },
   { id: "about", label: "About", icon: Info },
+  { id: "diagnostics", label: "Diagnostics", icon: Bug },
 ];
 
 const PAGE_META: Record<SettingsPage, { title: string; description: string }> = {
   general: { title: "General", description: "Language, theme and app behavior." },
   about: { title: "About", description: "Version and app info." },
+  diagnostics: {
+    title: "Diagnostics",
+    description: "Launch/registry state — for reporting a bug.",
+  },
 };
 
 export function SettingsModal({
@@ -161,6 +167,8 @@ export function SettingsModal({
                   </div>
                 </section>
               )}
+
+              {page === "diagnostics" && <Diagnostics />}
             </motion.div>
           </AnimatePresence>
         </div>

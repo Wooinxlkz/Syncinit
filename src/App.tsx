@@ -30,11 +30,13 @@ import {
   Settings,
   Wrench,
   FileArchive,
+  KeyRound,
 } from "lucide-react";
 import AddArchiveDialog, { type ArchiveDialogResult } from "./AddArchiveDialog";
 import PasswordDialog from "./PasswordDialog";
+import ChangePasswordDialog from "./ChangePasswordDialog";
 import { Modal } from "./Modal";
-import { SettingsModal } from "./Settings";
+import { SettingsModal, type SettingsPage } from "./Settings";
 import { UpdateBanner } from "./UpdateBanner";
 import { checkForUpdate, dismissUpdate, type UpdateInfo } from "./updateCheck";
 import { version as APP_VERSION } from "../package.json";
@@ -127,8 +129,9 @@ export default function App() {
   const [filterText, setFilterText] = useState("");
   const [findOpen, setFindOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [passwordChangeOpen, setPasswordChangeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<"general" | "about">("general");
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>("general");
   const [dragActive, setDragActive] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">(
     () => (localStorage.getItem("syncinit:theme") as "dark" | "light" | null) ?? "dark"
@@ -325,7 +328,7 @@ export default function App() {
   async function openArchive() {
     const file = await open({
       multiple: false,
-      filters: [{ name: "Archives", extensions: ["init", "zip", "7z", "tar", "gz", "tgz", "xz", "zst", "bz2"] }],
+      filters: [{ name: "Archives", extensions: ["init", "zip", "7z", "tar", "gz", "tgz", "xz", "zst", "bz2", "rar"] }],
     });
     if (file) await loadArchive(file as string);
   }
@@ -387,10 +390,17 @@ export default function App() {
     setBusy(true);
     setProgress(null);
     try {
-      const count = await api.extractArchive(source, destination, password);
+      const { count, warnings } = await api.extractArchive(source, destination, password);
       setPasswordRequest(null);
       setPasswordError("");
-      setStatus(t("toast.extracted", { count, dest: destination }));
+      // Extraction still completes with everything that *was* readable —
+      // these are entries that weren't (corrupt, unsafe path, I/O error),
+      // shown as a warning rather than a silent gap or a hard failure.
+      setStatus(
+        warnings.length > 0
+          ? `Extracted ${count}, but ${warnings.length} item${warnings.length === 1 ? "" : "s"} couldn't be extracted: ${warnings.slice(0, 3).join("; ")}${warnings.length > 3 ? "…" : ""}`
+          : t("toast.extracted", { count, dest: destination })
+      );
     } catch (err) {
       if (isCancelledError(err)) {
         setStatus("Cancelled.");
@@ -530,6 +540,12 @@ export default function App() {
               { label: "Add to archive…", icon: Package, onSelect: addFilesViaDialog },
               { label: "Extract to…", icon: FolderOutput, disabled: !archivePath, onSelect: extractCurrent },
               { label: "Test archive", icon: FlaskConical, disabled: !archivePath, onSelect: testCurrent },
+              {
+                label: "Set/change password…",
+                icon: KeyRound,
+                disabled: !archivePath || !summary || (summary.format !== "init" && summary.format !== "zip"),
+                onSelect: () => setPasswordChangeOpen(true),
+              },
               {
                 label: "Delete from archive",
                 icon: Trash2,
@@ -769,6 +785,19 @@ export default function App() {
           setPasswordError("");
         }}
         onSubmit={submitPassword}
+      />
+
+      <ChangePasswordDialog
+        open={passwordChangeOpen}
+        isEncrypted={!!summary?.encrypted}
+        onCancel={() => setPasswordChangeOpen(false)}
+        onSubmit={async (oldPassword, newPassword) => {
+          if (!archivePath) return;
+          await api.changeArchivePassword(archivePath, oldPassword, newPassword);
+          setPasswordChangeOpen(false);
+          setStatus(newPassword ? "Password updated." : "Password protection removed.");
+          await loadArchive(archivePath, newPassword);
+        }}
       />
 
       <SimpleModal title="Archive info" open={infoOpen && !!summary} onClose={() => setInfoOpen(false)}>

@@ -25,6 +25,12 @@ pub enum ArchiveError {
     UnsafeDelete,
     #[error("cancelled")]
     Cancelled,
+    #[error("archive has too many entries ({0}) — refusing as a likely decompression bomb")]
+    TooManyEntries(u64),
+    #[error("extracted output would exceed the safety limit ({0} bytes) — refusing as a likely decompression bomb")]
+    OutputTooLarge(u64),
+    #[error("entry \"{0}\" claims a compression ratio of {1}:1 — refusing as a likely decompression bomb")]
+    SuspiciousCompressionRatio(String, u64),
 }
 
 pub type Result<T> = std::result::Result<T, ArchiveError>;
@@ -65,6 +71,7 @@ pub enum Format {
     TarZst,
     TarBz2,
     SevenZ,
+    Rar,
 }
 
 impl Format {
@@ -86,6 +93,8 @@ impl Format {
             Some(Format::Init)
         } else if name.ends_with(".zip") {
             Some(Format::Zip)
+        } else if name.ends_with(".rar") {
+            Some(Format::Rar)
         } else {
             None
         }
@@ -152,6 +161,7 @@ pub fn list_archive(path: &str, password: Option<&str>) -> Result<ArchiveSummary
             list_tar(path, format)
         }
         Format::SevenZ => list_7z(path),
+        Format::Rar => list_rar(path),
     }
 }
 
@@ -159,6 +169,13 @@ fn list_zip(path: &Path, format: Format, password: Option<&str>) -> Result<Archi
     verify_zip_password(path, password)?;
     let file = File::open(path)?;
     let mut zip = zip::ZipArchive::new(BufReader::new(file))?;
+    // Same entry-count guard as extraction, checked *before*
+    // `Vec::with_capacity(zip.len())` below — a corrupt/malicious central
+    // directory claiming an absurd entry count would otherwise try to
+    // allocate for it immediately, before the loop even starts.
+    if zip.len() as u64 >= MAX_ENTRIES {
+        return Err(ArchiveError::TooManyEntries(zip.len() as u64));
+    }
     let mut entries = Vec::with_capacity(zip.len());
     let mut total_uncompressed = 0u64;
     let mut total_compressed = 0u64;
@@ -249,7 +266,10 @@ fn list_tar(path: &Path, format: Format) -> Result<ArchiveSummary> {
     let mut entries = Vec::new();
     let mut total_uncompressed = 0u64;
 
-    for entry in archive.entries()? {
+    for (index, entry) in archive.entries()?.enumerate() {
+        if index as u64 >= MAX_ENTRIES {
+            return Err(ArchiveError::TooManyEntries(index as u64));
+        }
         let entry = entry?;
         let header = entry.header();
         let size = header.size().unwrap_or(0);
@@ -308,6 +328,195 @@ fn list_7z(path: &Path) -> Result<ArchiveSummary> {
         }),
         comment: None,
     })
+}
+
+// ---- RAR (read-only, via an external 7-Zip install) ----
+//
+// RAR's compression format is proprietary — there's no pure-Rust decoder,
+// and the `unrar` crate still needs libunrar (a compiled C library with its
+// own non-MIT license) linked at build time, which isn't something this
+// project can pull in blind without a way to actually build and test it.
+// Instead: shell out to a 7-Zip install if one exists on the machine, the
+// same "external bridge" approach Squallz documents using for its own
+// non-native formats. This is read-only (RAR's own encoder is
+// closed-source; even WinRAR itself doesn't give that away), and requires
+// 7-Zip to actually be installed — Syncinit doesn't bundle it. If it's
+// missing, list_rar/extract_rar return a clear error saying so rather than
+// a cryptic failure.
+fn find_7z_exe() -> Option<PathBuf> {
+    let candidates = [
+        r"C:\Program Files\7-Zip\7z.exe",
+        r"C:\Program Files (x86)\7-Zip\7z.exe",
+    ];
+    for candidate in candidates {
+        let p = PathBuf::from(candidate);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    // Fall back to PATH resolution — `Command` does this automatically
+    // for a bare program name, so just check it actually runs.
+    for name in ["7z.exe", "7z"] {
+        if std::process::Command::new(name)
+            .arg("i")
+            .creation_flags_no_window()
+            .output()
+            .is_ok()
+        {
+            return Some(PathBuf::from(name));
+        }
+    }
+    None
+}
+
+/// `Command::output()` on Windows spawns with a visible console window by
+/// default when the calling process (Syncinit) has none of its own — same
+/// class of issue as the old context-menu `reg.exe`/`cmd.exe` console
+/// flash, fixed here with the same `CREATE_NO_WINDOW` flag.
+trait NoWindow {
+    fn creation_flags_no_window(&mut self) -> &mut Self;
+}
+impl NoWindow for std::process::Command {
+    fn creation_flags_no_window(&mut self) -> &mut Self {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            self.creation_flags(0x08000000);
+        }
+        self
+    }
+}
+
+const NO_7Z_MESSAGE: &str =
+    "RAR support needs 7-Zip installed (Syncinit doesn't bundle it) — install it from 7-zip.org, then try again";
+
+fn list_rar(path: &Path) -> Result<ArchiveSummary> {
+    let seven_zip = find_7z_exe().ok_or_else(|| ArchiveError::SevenZ(NO_7Z_MESSAGE.to_string()))?;
+    let output = std::process::Command::new(&seven_zip)
+        .args(["l", "-slt", "-ba"])
+        .arg(path)
+        .creation_flags_no_window()
+        .output()
+        .map_err(|e| ArchiveError::SevenZ(format!("running 7z: {e}")))?;
+    if !output.status.success() && output.stdout.is_empty() {
+        return Err(ArchiveError::SevenZ(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
+    }
+
+    // `7z l -slt` output: one block per entry, separated by a blank line,
+    // each block a set of "Key = Value" lines. Stable, documented format —
+    // this parsing hasn't been exercised against a real 7-Zip binary in
+    // this environment (no Windows box to test against here), so treat it
+    // as the part of this feature most worth verifying first.
+    #[derive(Default)]
+    struct PendingEntry {
+        name: Option<String>,
+        size: u64,
+        packed: u64,
+        is_dir: bool,
+        modified: Option<String>,
+        crc: Option<u32>,
+        encrypted: bool,
+    }
+    impl PendingEntry {
+        fn take(&mut self, out: &mut Vec<ArchiveEntry>, total_uncompressed: &mut u64, total_compressed: &mut u64, any_encrypted: &mut bool) {
+            if let Some(name) = self.name.take() {
+                *total_uncompressed += self.size;
+                *total_compressed += self.packed;
+                if self.encrypted {
+                    *any_encrypted = true;
+                }
+                out.push(ArchiveEntry {
+                    name,
+                    is_dir: self.is_dir,
+                    size: self.size,
+                    compressed_size: self.packed,
+                    modified: self.modified.take(),
+                    crc32: self.crc.take(),
+                });
+            }
+            *self = PendingEntry::default();
+        }
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut entries = Vec::new();
+    let mut total_uncompressed = 0u64;
+    let mut total_compressed = 0u64;
+    let mut encrypted = false;
+    let mut pending = PendingEntry::default();
+
+    for line in text.lines() {
+        let line = line.trim_end();
+        if line.is_empty() {
+            pending.take(&mut entries, &mut total_uncompressed, &mut total_compressed, &mut encrypted);
+            continue;
+        }
+        let Some((key, value)) = line.split_once(" = ") else { continue };
+        match key {
+            "Path" => pending.name = Some(value.to_string()),
+            "Size" => pending.size = value.parse().unwrap_or(0),
+            "Packed Size" => pending.packed = value.parse().unwrap_or(0),
+            "Folder" => pending.is_dir = value == "+",
+            "Modified" => pending.modified = Some(value.to_string()),
+            "CRC" => pending.crc = u32::from_str_radix(value, 16).ok(),
+            "Encrypted" => pending.encrypted = value == "+",
+            _ => {}
+        }
+    }
+    pending.take(&mut entries, &mut total_uncompressed, &mut total_compressed, &mut encrypted);
+
+    Ok(ArchiveSummary {
+        format: Format::Rar,
+        entries,
+        total_uncompressed,
+        total_compressed,
+        encrypted,
+        comment: None,
+    })
+}
+
+fn extract_rar(path: &Path, dest: &Path, password: Option<&str>) -> Result<(usize, Vec<String>)> {
+    let seven_zip = find_7z_exe().ok_or_else(|| ArchiveError::SevenZ(NO_7Z_MESSAGE.to_string()))?;
+    let mut cmd = std::process::Command::new(&seven_zip);
+    cmd.arg("x").arg(path).arg(format!("-o{}", dest.display())).arg("-y");
+    // -p<password> — 7-Zip needs the flag glued directly to the value, no
+    // space, or it's parsed as a second positional argument instead.
+    cmd.arg(format!("-p{}", password.unwrap_or("")));
+    let output = cmd
+        .creation_flags_no_window()
+        .output()
+        .map_err(|e| ArchiveError::SevenZ(format!("running 7z: {e}")))?;
+
+    // 7-Zip exit codes (documented, stable): 0 = full success, 1 = warning
+    // (some files skipped but the rest extracted — matches "keep what's
+    // readable" rather than treating a partial extract as total failure),
+    // anything else is a real failure.
+    match output.status.code() {
+        Some(0) => {}
+        Some(1) => { /* warning: fall through, still count as extracted */ }
+        _ => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.to_lowercase().contains("wrong password") || stderr.to_lowercase().contains("password") {
+                return Err(if password.is_some() {
+                    ArchiveError::BadPassword
+                } else {
+                    ArchiveError::PasswordRequired
+                });
+            }
+            return Err(ArchiveError::SevenZ(stderr.trim().to_string()));
+        }
+    }
+
+    let summary = list_rar(path)?;
+    let count = summary.entries.iter().filter(|e| !e.is_dir).count();
+    let warnings = if output.status.code() == Some(1) {
+        vec!["7-Zip reported one or more warnings during extraction — some entries may be incomplete".to_string()]
+    } else {
+        Vec::new()
+    };
+    Ok((count, warnings))
 }
 
 /// Create a new archive from a set of source files/directories. Returns
@@ -657,7 +866,51 @@ fn num_cpus() -> u32 {
 
 /// Extract an archive to a destination directory. Supports zip, tar variants,
 /// and 7z (read-only). Returns the number of entries extracted.
-pub fn extract_archive(path: &str, destination: &str, password: Option<&str>, ctx: &ProgressCtx) -> Result<usize> {
+/// Extraction-safety ceilings — not exhaustive DoS protection, just enough
+/// to refuse the classic "zip bomb" shapes (a tiny file that claims to
+/// decompress to petabytes, or millions of empty entries) instead of
+/// hanging the app or filling the disk. Modeled on the guardrails
+/// open-source archivers document explicitly as baseline safety (entry
+/// count limits, output size limits, compression-ratio limits) — Syncinit
+/// had none of these before. Deliberately generous: the goal is catching
+/// pathological/malicious shapes, not getting in the way of a legitimately
+/// huge, ordinarily-compressible archive.
+const MAX_ENTRIES: u64 = 1_000_000;
+const MAX_TOTAL_UNCOMPRESSED: u64 = 200 * 1024 * 1024 * 1024; // 200 GiB
+const MAX_RATIO: u64 = 1_000; // uncompressed : compressed
+/// Only flag a suspicious ratio once an entry claims more than this many
+/// uncompressed bytes — a 20-byte file of all zeros can "legitimately"
+/// have a huge ratio; that's not a bomb, it's just tiny.
+const RATIO_CHECK_FLOOR: u64 = 8 * 1024 * 1024;
+
+fn check_bomb_guard(
+    entry_index: u64,
+    compressed: u64,
+    uncompressed: u64,
+    running_total_uncompressed: u64,
+    entry_name: &str,
+) -> Result<()> {
+    if entry_index >= MAX_ENTRIES {
+        return Err(ArchiveError::TooManyEntries(entry_index));
+    }
+    if running_total_uncompressed > MAX_TOTAL_UNCOMPRESSED {
+        return Err(ArchiveError::OutputTooLarge(MAX_TOTAL_UNCOMPRESSED));
+    }
+    if uncompressed > RATIO_CHECK_FLOOR && compressed > 0 {
+        let ratio = uncompressed / compressed.max(1);
+        if ratio > MAX_RATIO {
+            return Err(ArchiveError::SuspiciousCompressionRatio(entry_name.to_string(), ratio));
+        }
+    }
+    Ok(())
+}
+
+pub fn extract_archive(
+    path: &str,
+    destination: &str,
+    password: Option<&str>,
+    ctx: &ProgressCtx,
+) -> Result<(usize, Vec<String>)> {
     let path = Path::new(path);
     let dest = Path::new(destination);
     std::fs::create_dir_all(dest)?;
@@ -671,20 +924,41 @@ pub fn extract_archive(path: &str, destination: &str, password: Option<&str>, ct
             extract_tar(path, dest, format, ctx)
         }
         Format::SevenZ => extract_7z(path, dest, password),
+        Format::Rar => extract_rar(path, dest, password),
     }
 }
 
-fn extract_zip(path: &Path, dest: &Path, password: Option<&str>, ctx: &ProgressCtx) -> Result<usize> {
+fn extract_zip(
+    path: &Path,
+    dest: &Path,
+    password: Option<&str>,
+    ctx: &ProgressCtx,
+) -> Result<(usize, Vec<String>)> {
     let file = File::open(path)?;
     let mut zip = zip::ZipArchive::new(BufReader::new(file))?;
     let mut count = 0;
+    let mut warnings = Vec::new();
     let total: u64 = (0..zip.len())
         .filter_map(|i| zip.by_index_raw(i).ok().map(|e| e.size()))
         .sum::<u64>()
         .max(1);
     let mut done = 0u64;
+    let mut running_uncompressed = 0u64;
 
     for i in 0..zip.len() {
+        // Bomb-guard check on the *declared* sizes from the zip header,
+        // before touching any entry content — a corrupt/malicious size
+        // claim gets caught here without decompressing a single byte.
+        // Unlike the per-entry warnings below, a bomb-guard trip aborts
+        // the whole extraction immediately rather than skipping just that
+        // entry: continuing to extract a suspected bomb defeats the point.
+        if let Ok(raw) = zip.by_index_raw(i) {
+            let name = raw.name().to_string();
+            let (compressed, uncompressed) = (raw.compressed_size(), raw.size());
+            running_uncompressed += uncompressed;
+            check_bomb_guard(i as u64, compressed, uncompressed, running_uncompressed, &name)?;
+        }
+
         let mut entry = if let Some(pw) = password {
             match zip.by_index_decrypt(i, pw.as_bytes()) {
                 Ok(e) => e,
@@ -696,23 +970,50 @@ fn extract_zip(path: &Path, dest: &Path, password: Option<&str>, ctx: &ProgressC
                 return Err(ArchiveError::PasswordRequired);
             }
             drop(raw);
-            zip.by_index(i)?
+            match zip.by_index(i) {
+                Ok(e) => e,
+                Err(e) => {
+                    // A single corrupt entry shouldn't sink everything
+                    // still readable in the archive — matches the same
+                    // "keep what's readable" behavior the create side
+                    // already got, and what a damaged-archive extract
+                    // should do rather than aborting on the first bad
+                    // entry.
+                    warnings.push(format!("entry {i}: {e}"));
+                    continue;
+                }
+            }
         };
 
-        let out_path = safe_archive_path(dest, entry.name())?;
+        let out_path = match safe_archive_path(dest, entry.name()) {
+            Ok(p) => p,
+            Err(e) => {
+                warnings.push(format!("{}: {e}", entry.name()));
+                continue;
+            }
+        };
         if entry.is_dir() {
             std::fs::create_dir_all(&out_path)?;
         } else {
             if let Some(parent) = out_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            let mut out_file = File::create(&out_path)?;
-            done += copy_with_progress(&mut entry, &mut out_file, done, total, ctx)?;
-            count += 1;
+            let name = entry.name().to_string();
+            match File::create(&out_path) {
+                Ok(mut out_file) => match copy_with_progress(&mut entry, &mut out_file, done, total, ctx) {
+                    Ok(written) => {
+                        done += written;
+                        count += 1;
+                    }
+                    Err(ArchiveError::Cancelled) => return Err(ArchiveError::Cancelled),
+                    Err(e) => warnings.push(format!("{name}: {e}")),
+                },
+                Err(e) => warnings.push(format!("{name}: {e}")),
+            }
         }
     }
 
-    Ok(count)
+    Ok((count, warnings))
 }
 
 fn safe_archive_path(destination: &Path, name: &str) -> Result<PathBuf> {
@@ -730,7 +1031,12 @@ fn safe_archive_path(destination: &Path, name: &str) -> Result<PathBuf> {
     Ok(destination.join(relative))
 }
 
-fn extract_tar(path: &Path, dest: &Path, format: Format, ctx: &ProgressCtx) -> Result<usize> {
+fn extract_tar(
+    path: &Path,
+    dest: &Path,
+    format: Format,
+    ctx: &ProgressCtx,
+) -> Result<(usize, Vec<String>)> {
     let total = std::fs::metadata(path)?.len().max(1);
     let file = File::open(path)?;
     let reader: Box<dyn Read> = match format {
@@ -743,27 +1049,62 @@ fn extract_tar(path: &Path, dest: &Path, format: Format, ctx: &ProgressCtx) -> R
     };
     let mut archive = tar::Archive::new(reader);
     let mut count = 0u64;
+    let mut warnings = Vec::new();
+    let mut running_uncompressed = 0u64;
+    let mut index = 0u64;
+
     for entry in archive.entries()? {
-        let mut entry = entry?;
-        entry.unpack_in(dest)?;
-        count += 1;
+        let mut entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                // A read error partway through a tar stream usually means
+                // everything after this point is unrecoverable too (unlike
+                // zip's central directory, tar has no index to skip
+                // forward with) — but what's already been written stays,
+                // matching "keep what's readable" rather than deleting it.
+                warnings.push(format!("entry {index}: {e}"));
+                break;
+            }
+        };
+
+        // tar has no per-entry "compressed size" (the whole stream shares
+        // one outer gzip/xz/zstd/bzip2 layer, not each entry individually),
+        // so only the entry-count and running-total-size guards apply here
+        // — the ratio check is zip-specific.
+        let declared_size = entry.header().size().unwrap_or(0);
+        running_uncompressed += declared_size;
+        let name = entry.path().map(|p| p.display().to_string()).unwrap_or_default();
+        check_bomb_guard(index, declared_size, declared_size, running_uncompressed, &name)?;
+        index += 1;
+
+        match entry.unpack_in(dest) {
+            Ok(true) => count += 1,
+            Ok(false) => warnings.push(format!("{name}: unsafe path, skipped")),
+            Err(e) => warnings.push(format!("{name}: {e}")),
+        }
         // tar entries stream from a compressed reader, so per-byte progress
         // against compressed file size isn't meaningful — tick coarsely
         // per-entry instead (still real cancel responsiveness, since
         // ctx.tick still checks the cancel flag every entry).
-        ctx.tick(count.min(total), total)?;
+        ctx.tick(index.min(total), total)?;
     }
-    Ok(count as usize)
+    Ok((count as usize, warnings))
 }
 
-fn extract_7z(path: &Path, dest: &Path, password: Option<&str>) -> Result<usize> {
+fn extract_7z(path: &Path, dest: &Path, password: Option<&str>) -> Result<(usize, Vec<String>)> {
+    // sevenz_rust's decompress_file_with_password is one all-or-nothing
+    // call with no per-entry hook, so unlike zip/tar above there's no
+    // "keep what's readable" here — a bad entry fails the whole extract.
+    // No pre-check bomb guard either, for the same reason (no visibility
+    // into declared sizes before it's already extracting); the running
+    // process's own memory/disk limits are the only backstop for 7z today.
     let pw = sevenz_rust::Password::from(password.unwrap_or(""));
     sevenz_rust::decompress_file_with_password(path, dest, pw.clone())
         .map_err(|e| ArchiveError::SevenZ(e.to_string()))?;
 
     let archive = sevenz_rust::Archive::open_with_password(path, &pw)
         .map_err(|e| ArchiveError::SevenZ(e.to_string()))?;
-    Ok(archive.files.len())
+    Ok((archive.files.len(), Vec::new()))
 }
 
 /// Verify every entry's CRC-32 matches its stored value (zip "Test archive").
@@ -891,6 +1232,95 @@ fn delete_entries_into(
         .map_err(|e| e.into_error())?
         .flush()?;
     Ok(removed)
+}
+
+/// Adds, changes, or removes password protection on an existing .init/.zip
+/// archive. Zip/AES encryption is applied per-entry at write time — there's
+/// no way to just "add a password" to bytes already written, so this reads
+/// every entry (decrypting with `old_password` if the archive is currently
+/// protected) and rewrites all of them into a fresh archive using
+/// `new_password` for the new state (`None` removes protection entirely).
+pub fn change_password(
+    path: &str,
+    old_password: Option<&str>,
+    new_password: Option<&str>,
+    ctx: &ProgressCtx,
+) -> Result<()> {
+    let format = Format::from_path(Path::new(path))
+        .ok_or_else(|| ArchiveError::UnsupportedFormat(path.to_string()))?;
+    if !matches!(format, Format::Init | Format::Zip) {
+        return Err(ArchiveError::UnsupportedFormat(
+            "password protection is only supported for .init/.zip archives".to_string(),
+        ));
+    }
+
+    let temp_path = PathBuf::from(format!("{path}.syncinit-part-{}", std::process::id()));
+    let result = change_password_into(path, old_password, new_password, ctx, &temp_path);
+    match result {
+        Ok(()) => {
+            std::fs::remove_file(path)?;
+            std::fs::rename(&temp_path, path)?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp_path);
+            Err(e)
+        }
+    }
+}
+
+fn change_password_into(
+    path: &str,
+    old_password: Option<&str>,
+    new_password: Option<&str>,
+    ctx: &ProgressCtx,
+    temp_path: &Path,
+) -> Result<()> {
+    let src_file = File::open(path)?;
+    let mut reader = zip::ZipArchive::new(BufReader::new(src_file))?;
+
+    let out_file = BufWriter::new(File::create(temp_path)?);
+    let mut writer = zip::ZipWriter::new(out_file);
+    if !reader.comment().is_empty() {
+        writer.set_comment(String::from_utf8_lossy(reader.comment()).into_owned());
+    }
+
+    let total = reader.len() as u64;
+
+    for i in 0..reader.len() {
+        ctx.tick(i as u64, total.max(1))?;
+
+        let is_encrypted = reader.by_index_raw(i)?.encrypted();
+        let mut entry = if is_encrypted {
+            let pw = old_password.ok_or(ArchiveError::PasswordRequired)?;
+            reader
+                .by_index_decrypt(i, pw.as_bytes())
+                .map_err(|_| ArchiveError::BadPassword)?
+        } else {
+            reader.by_index(i)?
+        };
+
+        let mut options: zip::write::FileOptions<()> = zip::write::FileOptions::default()
+            .compression_method(entry.compression())
+            .unix_permissions(entry.unix_mode().unwrap_or(0o644));
+        if let Some(pw) = new_password {
+            options = options.with_aes_encryption(zip::AesMode::Aes256, pw);
+        }
+
+        if entry.is_dir() {
+            writer.add_directory(entry.name().to_string(), options)?;
+        } else {
+            writer.start_file(entry.name().to_string(), options)?;
+            std::io::copy(&mut entry, &mut writer)?;
+        }
+    }
+
+    writer
+        .finish()?
+        .into_inner()
+        .map_err(|e| e.into_error())?
+        .flush()?;
+    Ok(())
 }
 
 /// Delete the original inputs only after an archive has been created and the

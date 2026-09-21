@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type Format = "init" | "zip" | "tar" | "targz" | "tarxz" | "tarzst" | "tarbz2" | "sevenz";
+export type Format = "init" | "zip" | "tar" | "targz" | "tarxz" | "tarzst" | "tarbz2" | "sevenz" | "rar";
 
 export interface ArchiveEntry {
   name: string;
@@ -41,8 +41,21 @@ export const api = {
     invoke<number>("delete_sources", { sources, destination }),
   deleteEntries: (path: string, names: string[]) => invoke<number>("delete_entries", { path, names }),
   extractArchive: (path: string, destination: string, password?: string) =>
-    invoke<number>("extract_archive", { path, destination, password: password ?? null }),
+    invoke<{ count: number; warnings: string[] }>("extract_archive", {
+      path,
+      destination,
+      password: password ?? null,
+    }),
   testArchive: (path: string) => invoke<boolean>("test_archive", { path }),
+  // old_password: current password if the archive is already protected
+  // (omit/undefined if it isn't). new_password: empty string or omitted
+  // removes protection entirely.
+  changeArchivePassword: (path: string, oldPassword: string | undefined, newPassword: string | undefined) =>
+    invoke<void>("change_archive_password", {
+      path,
+      oldPassword: oldPassword || null,
+      newPassword: newPassword || null,
+    }),
   cancelOperation: () => invoke<void>("cancel_operation"),
   detectFormat: (path: string) => invoke<string | null>("detect_format", { path }),
 };

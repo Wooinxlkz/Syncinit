@@ -1,5 +1,66 @@
 # Releases
 
+## v0.1.14
+
+Took the "check open source, use what's there" instruction seriously —
+researched two real open-source archivers (Squallz, Ziplark; same stack,
+Tauri+Rust) and brought over what actually applied:
+
+- **Decompression-bomb guardrails** — entry-count limits, running
+  output-size limits, and per-entry compression-ratio limits, modeled on
+  the baseline safety guardrails Squallz documents explicitly. Syncinit
+  had zip-slip/path-traversal protection already but nothing stopping a
+  malicious or corrupt archive claiming millions of entries or a
+  1000:1+ expansion ratio from hanging the app or filling the disk.
+  Applied to extraction and to listing (a bogus entry-count in a zip's
+  central directory could otherwise trigger a huge upfront allocation
+  before a single byte is read).
+- **Extraction now survives a damaged archive** — matches Ziplark's
+  "extract what's readable": a corrupt or unsafe entry is logged as a
+  warning and extraction continues, instead of the whole operation
+  aborting on the first bad entry. Same shape as the fix already applied
+  to archive *creation*. 7z extraction stays all-or-nothing — the
+  library used gives no per-entry hook to do better.
+- **Context menu Reinstall / Uninstall**, explicit buttons in
+  Settings → Diagnostics — matches Ziplark's `shell-integration
+  install/status/uninstall` pattern instead of silent, invisible
+  auto-registration on every launch with no way to undo it short of
+  hand-editing the registry.
+- **RAR read support** (list + extract), via a system 7-Zip install if
+  one exists — RAR's format is proprietary with no pure-Rust decoder,
+  and linking libunrar directly needs a compiled C library with its own
+  license terms this project can't take on blind. This is the one
+  change in this release that genuinely needs real-world testing before
+  trusting it: the 7-Zip CLI output parsing has not run against an
+  actual 7-Zip binary or a real RAR file in this environment.
+
+## v0.1.13
+
+- **Researched before fixing, as asked.** Confirmed via Microsoft's own
+  shell-verb docs that `MultiSelectModel` must be set on *each verb*, not
+  inherited from a cascading parent menu — and found a 7-Zip registration
+  reference making the same point about multi-file "Add to archive"
+  specifically. Our code only ever set it on the parent "Syncinit" key,
+  never on the "Add to archive…"/"Add to .init archive"/"Compress and
+  email…" entries themselves. Now set on all three directly — this is a
+  real, documented cause for multiple selected files not correctly
+  reaching one invocation, not a guess. Also confirmed 7-Zip's most
+  polished integration is a full COM shell extension (a separate DLL),
+  which is a much bigger undertaking than this registry-based approach;
+  noting that honestly rather than pretending it's equivalent.
+- **New in-app Diagnostics page** (Settings → Diagnostics): raw launch
+  argv, what it parsed into, a running timestamped log of every
+  registration/relaunch event since startup, live context-menu registry
+  state, and the `.init` icon's actual on-disk status (path, size, last
+  write time) — with one-click "Copy all". No more needing devtools open
+  to report a bug.
+- **Password/PIN can now be set, changed, or removed on an existing
+  archive** — Commands → "Set/change password…". Zip/AES encryption is
+  applied per-entry at write time, so there's no way to "just add" a
+  password to bytes already written; this decrypts every entry (with the
+  old password, if it's already protected) and rewrites the archive with
+  the new setting.
+
 ## v0.1.12
 
 Full audit fix, everything from the "check all the bullshit errors" list:

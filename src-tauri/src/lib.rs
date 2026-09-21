@@ -41,6 +41,49 @@ fn write_init_file_icon() -> std::io::Result<std::path::PathBuf> {
     Ok(ico_path)
 }
 
+/// On-demand check of the .init icon's actual on-disk state — for
+/// Settings' Diagnostics page, so "is the icon fix actually working" is a
+/// direct answer instead of a guess: does the file exist at
+/// %LOCALAPPDATA%\Syncinit\init-file.ico, how big is it, when was it last
+/// written. If it's missing or 0 bytes, the write is failing (permissions,
+/// disk space); if it's there and recent but Explorer still shows the
+/// wrong icon, that points at Explorer's own icon cache instead.
+#[tauri::command]
+fn get_icon_diagnostics() -> serde_json::Value {
+    #[cfg(not(windows))]
+    {
+        serde_json::json!({ "platform": "non-windows, not applicable" })
+    }
+    #[cfg(windows)]
+    {
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let ico_path = base.join("Syncinit").join("init-file.ico");
+        match std::fs::metadata(&ico_path) {
+            Ok(meta) => {
+                let modified = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs());
+                serde_json::json!({
+                    "path": ico_path.to_string_lossy(),
+                    "exists": true,
+                    "size_bytes": meta.len(),
+                    "modified_unix": modified,
+                    "embedded_size_bytes": INIT_FILE_ICON.len(),
+                })
+            }
+            Err(e) => serde_json::json!({
+                "path": ico_path.to_string_lossy(),
+                "exists": false,
+                "error": e.to_string(),
+            }),
+        }
+    }
+}
+
 
 #[cfg(windows)]
 fn set_reg_value(path: &str, name: &str, data: &str) -> std::io::Result<()> {
@@ -89,17 +132,63 @@ fn cleanup_legacy_registrations() {
     // rewrites it to "Syncinit.Archive" right after this call regardless.
 }
 
+/// The inverse of registration — removes every registry entry Syncinit
+/// itself writes (the "Syncinit" shell verb tree under `*`/`Directory`/
+/// `Directory\Background`, the `.init` file association, and the
+/// `Syncinit.Archive` ProgID). Paired with `register_context_menu` /
+/// `reinstall_context_menu` as an explicit, user-triggered install /
+/// status / uninstall set — matching the pattern open-source archivers
+/// like Ziplark ship (`shell-integration install/status/uninstall`)
+/// instead of silent, invisible auto-registration on every launch with no
+/// way to actually undo it short of hand-editing the registry.
 #[tauri::command]
-async fn register_context_menu() -> Result<bool, String> {
+async fn uninstall_context_menu() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        #[cfg(windows)]
+        {
+            use winreg::enums::HKEY_CURRENT_USER;
+            use winreg::RegKey;
+            let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+            for root in ["Software\\Classes\\*", "Software\\Classes\\Directory"] {
+                let _ = hkcu.delete_subkey_all(&format!("{root}\\shell\\Syncinit"));
+            }
+            let _ = hkcu.delete_subkey_all("Software\\Classes\\Directory\\Background\\shell\\Syncinit");
+            let _ = hkcu.delete_subkey_all("Software\\Classes\\.init");
+            let _ = hkcu.delete_subkey_all("Software\\Classes\\Syncinit.Archive");
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Re-runs registration unconditionally, bypassing the up-to-date check
+/// register_context_menu normally short-circuits on — for the explicit
+/// "Reinstall" button in Diagnostics, so a person can force a clean
+/// re-registration on demand rather than needing a version bump to make
+/// it actually run.
+#[tauri::command]
+async fn reinstall_context_menu(app: tauri::AppHandle) -> Result<bool, String> {
+    let result = tauri::async_runtime::spawn_blocking(|| register_context_menu_impl(true))
+        .await
+        .map_err(|e| e.to_string())?;
+    log_diag(&app.state::<DiagnosticsLog>(), format!("reinstall_context_menu result: {result:?}"));
+    result
+}
+
+#[tauri::command]
+async fn register_context_menu(app: tauri::AppHandle) -> Result<bool, String> {
     // ~40 registry writes on a fresh install/upgrade — fast (a handful of
     // ms) but still main-thread work every single launch if left as a sync
     // command; same fix as the heavy archive commands above.
-    tauri::async_runtime::spawn_blocking(register_context_menu_impl)
+    let result = tauri::async_runtime::spawn_blocking(|| register_context_menu_impl(false))
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    log_diag(&app.state::<DiagnosticsLog>(), format!("register_context_menu result: {result:?}"));
+    result
 }
 
-fn register_context_menu_impl() -> Result<bool, String> {
+fn register_context_menu_impl(force: bool) -> Result<bool, String> {
     #[cfg(not(windows))]
     {
         return Ok(false);
@@ -129,14 +218,16 @@ fn register_context_menu_impl() -> Result<bool, String> {
         // window station to attach a new console to without
         // CREATE_NO_WINDOW) and adding real process-spawn overhead 40+
         // times over — is what was causing the freeze and the console
-        // flicker on every startup.
+        // flicker on every startup. `force` (the explicit "Reinstall"
+        // button in Diagnostics) bypasses this entirely.
         const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        let up_to_date = hkcu
-            .open_subkey("Software\\Classes\\*\\shell\\Syncinit\\shell\\01_add\\command")
-            .and_then(|k| k.get_value::<String, _>(""))
-            .map(|existing| existing == format!("{exe_quoted} --add %*"))
-            .unwrap_or(false)
+        let up_to_date = !force
+            && hkcu
+                .open_subkey("Software\\Classes\\*\\shell\\Syncinit\\shell\\01_add\\command")
+                .and_then(|k| k.get_value::<String, _>(""))
+                .map(|existing| existing == format!("{exe_quoted} --add %*"))
+                .unwrap_or(false)
             && hkcu
                 .open_subkey("Software\\Classes\\*\\shell\\Syncinit")
                 .and_then(|k| k.get_value::<String, _>("SyncinitVersion"))
@@ -171,7 +262,7 @@ fn register_context_menu_impl() -> Result<bool, String> {
                 set_reg_value(
                     &open,
                     "AppliesTo",
-                    "System.FileExtension:=\".init\" OR System.FileExtension:=\".zip\" OR System.FileExtension:=\".7z\" OR System.FileExtension:=\".tar\" OR System.FileExtension:=\".gz\" OR System.FileExtension:=\".xz\" OR System.FileExtension:=\".zst\" OR System.FileExtension:=\".bz2\"",
+                    "System.FileExtension:=\".init\" OR System.FileExtension:=\".zip\" OR System.FileExtension:=\".7z\" OR System.FileExtension:=\".tar\" OR System.FileExtension:=\".gz\" OR System.FileExtension:=\".xz\" OR System.FileExtension:=\".zst\" OR System.FileExtension:=\".bz2\" OR System.FileExtension:=\".rar\"",
                 )
                 .map_err(|e| e.to_string())?;
                 set_reg_value(&format!("{open}\\command"), "", &format!("{exe_quoted} \"%1\""))
@@ -183,7 +274,7 @@ fn register_context_menu_impl() -> Result<bool, String> {
                 set_reg_value(
                     &extract,
                     "AppliesTo",
-                    "System.FileExtension:=\".init\" OR System.FileExtension:=\".zip\" OR System.FileExtension:=\".7z\" OR System.FileExtension:=\".tar\" OR System.FileExtension:=\".gz\" OR System.FileExtension:=\".xz\" OR System.FileExtension:=\".zst\" OR System.FileExtension:=\".bz2\"",
+                    "System.FileExtension:=\".init\" OR System.FileExtension:=\".zip\" OR System.FileExtension:=\".7z\" OR System.FileExtension:=\".tar\" OR System.FileExtension:=\".gz\" OR System.FileExtension:=\".xz\" OR System.FileExtension:=\".zst\" OR System.FileExtension:=\".bz2\" OR System.FileExtension:=\".rar\"",
                 )
                 .map_err(|e| e.to_string())?;
                 set_reg_value(
@@ -197,12 +288,22 @@ fn register_context_menu_impl() -> Result<bool, String> {
             let add = format!("{menu}\\shell\\01_add");
             set_reg_value(&add, "", "Add to archive...").map_err(|e| e.to_string())?;
             set_reg_value(&add, "Icon", &format!("{exe_str},0")).map_err(|e| e.to_string())?;
+            // MultiSelectModel has to be set on THIS verb, not just the
+            // cascading parent ("Syncinit") above — Microsoft's own docs are
+            // explicit that it's "specified for all verbs", not inherited.
+            // Without it here, Windows falls back to the per-verb default
+            // (Document), which is built for "open a window per file", not
+            // "run once with every selected path in %*" — likely why
+            // selecting several files and choosing "Add to archive…" wasn't
+            // handing them all to one dialog.
+            set_reg_value(&add, "MultiSelectModel", "Player").map_err(|e| e.to_string())?;
             set_reg_value(&format!("{add}\\command"), "", &format!("{exe_quoted} --add %*"))
                 .map_err(|e| e.to_string())?;
 
             let quick = format!("{menu}\\shell\\02_add_default");
             set_reg_value(&quick, "", "Add to .init archive").map_err(|e| e.to_string())?;
             set_reg_value(&quick, "Icon", &format!("{exe_str},0")).map_err(|e| e.to_string())?;
+            set_reg_value(&quick, "MultiSelectModel", "Player").map_err(|e| e.to_string())?;
             set_reg_value(
                 &format!("{quick}\\command"),
                 "",
@@ -213,6 +314,7 @@ fn register_context_menu_impl() -> Result<bool, String> {
             let mail = format!("{menu}\\shell\\03_add_mail");
             set_reg_value(&mail, "", "Compress and email...").map_err(|e| e.to_string())?;
             set_reg_value(&mail, "Icon", &format!("{exe_str},0")).map_err(|e| e.to_string())?;
+            set_reg_value(&mail, "MultiSelectModel", "Player").map_err(|e| e.to_string())?;
             set_reg_value(
                 &format!("{mail}\\command"),
                 "",
@@ -231,7 +333,7 @@ fn register_context_menu_impl() -> Result<bool, String> {
         )
         .map_err(|e| e.to_string())?;
 
-        for extension in ["init", "zip", "7z"] {
+        for extension in ["init", "zip", "7z", "rar"] {
             let base = format!("Software\\Classes\\SystemFileAssociations\\.{extension}\\shell");
             let extract = format!("{base}\\SyncinitExtractHere");
             set_reg_value(&extract, "", "Extract Here").map_err(|e| e.to_string())?;
@@ -376,6 +478,16 @@ struct ProgressPayload {
     total: u64,
 }
 
+#[derive(Serialize)]
+struct ExtractResult {
+    count: usize,
+    // Paths that couldn't be extracted (corrupt entry, unsafe path, I/O
+    // error) — the extraction still completes with everything that *was*
+    // readable instead of aborting on the first bad entry (matches the
+    // same "keep what's readable" behavior create already has).
+    warnings: Vec<String>,
+}
+
 fn begin_operation(state: &tauri::State<'_, CancelState>) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
     let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     *state.0.lock().unwrap() = Some(flag.clone());
@@ -457,6 +569,28 @@ async fn delete_entries(path: String, names: Vec<String>) -> Result<usize, Strin
     .map_err(|e| e.to_string())?
 }
 
+/// Set, change, or remove a password/PIN on an already-created archive —
+/// wasn't possible before (password was only ever set at creation time).
+/// `new_password: None` (or empty string from the UI) removes protection.
+#[tauri::command]
+async fn change_archive_password(
+    path: String,
+    old_password: Option<String>,
+    new_password: Option<String>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        archive::change_password(
+            &path,
+            old_password.as_deref(),
+            new_password.as_deref().filter(|p| !p.is_empty()),
+            &archive::ProgressCtx::none(),
+        )
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn extract_archive(
     app: tauri::AppHandle,
@@ -464,7 +598,7 @@ async fn extract_archive(
     path: String,
     destination: String,
     password: Option<String>,
-) -> Result<usize, String> {
+) -> Result<ExtractResult, String> {
     let cancel_flag = begin_operation(&state);
     tauri::async_runtime::spawn_blocking(move || {
         let last_emit = std::cell::Cell::new(std::time::Instant::now());
@@ -476,7 +610,9 @@ async fn extract_archive(
             let _ = app.emit("syncinit://progress", ProgressPayload { done, total });
         };
         let ctx = archive::ProgressCtx { on_progress: Some(&on_progress), cancelled: Some(&cancel_flag) };
-        archive::extract_archive(&path, &destination, password.as_deref(), &ctx).map_err(|e| e.to_string())
+        archive::extract_archive(&path, &destination, password.as_deref(), &ctx)
+            .map(|(count, warnings)| ExtractResult { count, warnings })
+            .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -526,6 +662,33 @@ enum LaunchAction {
 
 struct LaunchState(Mutex<LaunchAction>);
 
+/// A running, timestamped log of the launch/registration lifecycle —
+/// startup argv, what it parsed into, single-instance relaunches, context
+/// menu registration outcomes, icon-write outcomes. Exists so "it's not
+/// working" has somewhere to point: read back via `get_diagnostics` (shown
+/// on Settings' Diagnostics page, with a one-click copy) instead of asking
+/// someone to dig through devtools. Capped so it can't grow unbounded
+/// across a long-running session.
+struct DiagnosticsLog(Mutex<Vec<String>>);
+
+fn log_diag(state: &tauri::State<DiagnosticsLog>, entry: impl Into<String>) {
+    let mut log = state.0.lock().unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    log.push(format!("[{now}] {}", entry.into()));
+    if log.len() > 200 {
+        let excess = log.len() - 200;
+        log.drain(0..excess);
+    }
+}
+
+#[tauri::command]
+fn get_diagnostics(state: tauri::State<DiagnosticsLog>) -> Vec<String> {
+    state.0.lock().unwrap().clone()
+}
+
 fn parse_launch_action(args: &[String]) -> LaunchAction {
     // args[0] is the exe path.
     if args.len() < 2 {
@@ -571,7 +734,12 @@ fn get_raw_args() -> Vec<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let launch_action = parse_launch_action(&std::env::args().collect::<Vec<_>>());
+    let raw_argv: Vec<String> = std::env::args().collect();
+    let launch_action = parse_launch_action(&raw_argv);
+    let diagnostics = DiagnosticsLog(Mutex::new(vec![
+        format!("startup argv: {raw_argv:?}"),
+        format!("startup parsed as: {launch_action:?}"),
+    ]));
 
     tauri::Builder::default()
         // Must be the first plugin registered. When a second copy of
@@ -583,6 +751,8 @@ pub fn run() {
         // doesn't work" looked like whenever the app was already running.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let action = parse_launch_action(&argv);
+            log_diag(&app.state::<DiagnosticsLog>(), format!("relaunch argv: {argv:?}"));
+            log_diag(&app.state::<DiagnosticsLog>(), format!("relaunch parsed as: {action:?}"));
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.set_focus();
@@ -596,6 +766,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(LaunchState(Mutex::new(launch_action)))
         .manage(CancelState(Mutex::new(None)))
+        .manage(diagnostics)
         .setup(|app| {
             #[cfg(debug_assertions)]
             {
@@ -606,6 +777,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             register_context_menu,
+            reinstall_context_menu,
+            uninstall_context_menu,
             debug_context_menu,
             cancel_operation,
             reveal_in_file_manager,
@@ -614,11 +787,14 @@ pub fn run() {
             create_archive,
             delete_sources,
             delete_entries,
+            change_archive_password,
             extract_archive,
             test_archive,
             detect_format,
             get_launch_action,
-            get_raw_args
+            get_raw_args,
+            get_diagnostics,
+            get_icon_diagnostics
         ])
         .run(tauri::generate_context!())
         .expect("error while running Syncinit");
