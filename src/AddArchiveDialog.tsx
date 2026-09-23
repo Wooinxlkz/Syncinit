@@ -13,11 +13,16 @@ export interface ArchiveDialogResult {
   testAfter: boolean;
   comment: string;
   smartStore: boolean;
+  // true = one archive per selected item, instead of combining everything
+  // into the single archive named above. Only meaningful when more than
+  // one source was selected — ignored otherwise.
+  separate: boolean;
 }
 
 interface Props {
   open: boolean;
   defaultName: string;
+  sourceCount: number;
   onCancel: () => void;
   onConfirm: (result: ArchiveDialogResult) => void;
 }
@@ -31,7 +36,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "comment", label: "Comment" },
 ];
 
-export default function AddArchiveDialog({ open, defaultName, onCancel, onConfirm }: Props) {
+export default function AddArchiveDialog({ open, defaultName, sourceCount, onCancel, onConfirm }: Props) {
   const [tab, setTab] = useState<Tab>("general");
   const [name, setName] = useState(defaultName);
   const [format, setFormat] = useState<Format>("init");
@@ -42,6 +47,7 @@ export default function AddArchiveDialog({ open, defaultName, onCancel, onConfir
   const [testAfter, setTestAfter] = useState(false);
   const [comment, setComment] = useState("");
   const [smartStore, setSmartStore] = useState(true);
+  const [separate, setSeparate] = useState(false);
 
   // Reset the form to a clean slate every time the dialog is (re)opened,
   // since it now stays mounted (for the Modal exit animation) instead of
@@ -58,6 +64,7 @@ export default function AddArchiveDialog({ open, defaultName, onCancel, onConfir
     setTestAfter(false);
     setComment("");
     setSmartStore(true);
+    setSeparate(false);
   }, [open, defaultName]);
 
   const pinIncomplete = pinEnabled && pin.length > 0 && pin.length < 6;
@@ -73,6 +80,7 @@ export default function AddArchiveDialog({ open, defaultName, onCancel, onConfir
       testAfter,
       comment,
       smartStore,
+      separate: separate && sourceCount > 1,
     });
   }
 
@@ -102,8 +110,19 @@ export default function AddArchiveDialog({ open, defaultName, onCancel, onConfir
           <>
             <label className="field">
               <span>Archive name</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} />
+              <input value={name} onChange={(e) => setName(e.target.value)} disabled={separate} />
             </label>
+
+            {sourceCount > 1 && (
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={separate}
+                  onChange={(e) => setSeparate(e.target.checked)}
+                />
+                Create a separate archive for each item ({sourceCount} archives) instead of combining them
+              </label>
+            )}
 
             <div className="field">
               <span>Archive format</span>
@@ -215,7 +234,11 @@ export default function AddArchiveDialog({ open, defaultName, onCancel, onConfir
         <button className="btn-secondary" onClick={onCancel}>
           Cancel
         </button>
-        <button className="btn-primary" onClick={submit} disabled={pinIncomplete || !name.trim()}>
+        <button
+          className="btn-primary"
+          onClick={submit}
+          disabled={pinIncomplete || (!separate && !name.trim())}
+        >
           OK
         </button>
       </div>

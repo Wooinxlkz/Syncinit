@@ -1,6 +1,6 @@
 [package]
 name = "syncinit"
-version = "0.1.16"
+version = "0.1.18"
 description = "Syncinit — a fast, modern archive manager (WinRAR alternative) built in Rust + Tauri"
 edition = "2021"
 authors = ["Ch. Abdelkrim"]

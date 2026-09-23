@@ -226,7 +226,7 @@ fn register_context_menu_impl(force: bool) -> Result<bool, String> {
             && hkcu
                 .open_subkey("Software\\Classes\\*\\shell\\Syncinit\\shell\\01_add\\command")
                 .and_then(|k| k.get_value::<String, _>(""))
-                .map(|existing| existing == format!("{exe_quoted} --add %*"))
+                .map(|existing| existing == format!("{exe_quoted} --add %1"))
                 .unwrap_or(false)
             && hkcu
                 .open_subkey("Software\\Classes\\*\\shell\\Syncinit")
@@ -288,16 +288,22 @@ fn register_context_menu_impl(force: bool) -> Result<bool, String> {
             let add = format!("{menu}\\shell\\01_add");
             set_reg_value(&add, "", "Add to archive...").map_err(|e| e.to_string())?;
             set_reg_value(&add, "Icon", &format!("{exe_str},0")).map_err(|e| e.to_string())?;
-            // MultiSelectModel has to be set on THIS verb, not just the
-            // cascading parent ("Syncinit") above — Microsoft's own docs are
-            // explicit that it's "specified for all verbs", not inherited.
-            // Without it here, Windows falls back to the per-verb default
-            // (Document), which is built for "open a window per file", not
-            // "run once with every selected path in %*" — likely why
-            // selecting several files and choosing "Add to archive…" wasn't
-            // handing them all to one dialog.
+            // MultiSelectModel set on this verb (not just the cascading
+            // parent) per Microsoft's docs — real cause of the *actual*
+            // bug turned out to be simpler and more basic than that,
+            // though: `%*` itself is well-documented as unreliable in
+            // registry shell commands — community-collected evidence
+            // ("%2 or %* are blank, even if multiple files are selected")
+            // and a real diagnostics capture from this app both show it
+            // expanding to nothing even for a single selected file. `%1`
+            // is universally reliable and is what Open/Extract Here
+            // already use below. Multi-file selection with Player set
+            // still launches once per file in practice (not one call with
+            // every path) — each launch reaches the single-instance
+            // handler and is handled there rather than lost, which is why
+            // MultiSelectModel is still worth keeping set.
             set_reg_value(&add, "MultiSelectModel", "Player").map_err(|e| e.to_string())?;
-            set_reg_value(&format!("{add}\\command"), "", &format!("{exe_quoted} --add %*"))
+            set_reg_value(&format!("{add}\\command"), "", &format!("{exe_quoted} --add %1"))
                 .map_err(|e| e.to_string())?;
 
             let quick = format!("{menu}\\shell\\02_add_default");
@@ -307,7 +313,7 @@ fn register_context_menu_impl(force: bool) -> Result<bool, String> {
             set_reg_value(
                 &format!("{quick}\\command"),
                 "",
-                &format!("{exe_quoted} --add-default %*"),
+                &format!("{exe_quoted} --add-default %1"),
             )
             .map_err(|e| e.to_string())?;
 
@@ -318,7 +324,7 @@ fn register_context_menu_impl(force: bool) -> Result<bool, String> {
             set_reg_value(
                 &format!("{mail}\\command"),
                 "",
-                &format!("{exe_quoted} --add-mail %*"),
+                &format!("{exe_quoted} --add-mail %1"),
             )
             .map_err(|e| e.to_string())?;
         }

@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { invoke } from "./invokeSafe";
 import { listen } from "@tauri-apps/api/event";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
@@ -82,6 +82,32 @@ function basename(p: string) {
 // back the same name instead of stacking a second ".init.init" suffix.
 function defaultInitName(path: string) {
   return `${basename(path).replace(/\.[^/.]+$/, "")}.init`;
+}
+
+// Same idea as defaultInitName but for whichever format the person picked
+// in the dialog — used when batch-compressing (one archive per selected
+// item) since each item needs its own distinct name, not the single name
+// typed for what would otherwise be one combined archive.
+function defaultNameForFormat(path: string, format: ArchiveDialogResult["format"]) {
+  return `${basename(path).replace(/\.[^/.]+$/, "")}${archiveExtension(format)}`;
+}
+
+// "Extract Here" destination, matching what 7-Zip/WinRAR call "smart
+// extract": if the archive already wraps everything in one single
+// top-level folder, extracting straight into the archive's own folder is
+// fine (its contents land inside that one folder, nothing spills out). If
+// the archive has multiple loose top-level files/folders instead, dumping
+// them directly into the same folder as the archive mixes them in with
+// whatever else is already there — so those get their own new folder
+// (named after the archive) to land in instead, the same way a fresh
+// extract naturally would if you'd chosen a destination yourself.
+function smartExtractDestination(archivePath: string, entries: { name: string }[]): string {
+  const parent = dirname(archivePath);
+  if (entries.length === 0) return parent;
+  const topLevel = new Set(entries.map((e) => e.name.split("/")[0]));
+  if (topLevel.size === 1) return parent;
+  const folderName = basename(archivePath).replace(/\.[^/.]+$/, "");
+  return `${parent}/${folderName}`;
 }
 
 function archiveExtension(format: ArchiveDialogResult["format"]) {
@@ -236,11 +262,11 @@ export default function App() {
     window.addEventListener("keydown", closeOnEscape);
 
     invoke<LaunchAction>("get_launch_action").then((action) => {
-      if (action && action.mode !== "none") handleLaunchAction(action);
+      if (action && action.mode !== "none") queueLaunchAction(action);
     });
     const unlistenRelaunch = listen<LaunchAction>("syncinit://relaunch-action", (event) => {
       console.log("Syncinit relaunch-action received:", event.payload);
-      handleLaunchAction(event.payload);
+      queueLaunchAction(event.payload);
     });
     return () => {
       window.removeEventListener("click", closeMenu);
@@ -258,6 +284,32 @@ export default function App() {
   // instead of reusing the open window, which looked like the context menu
   // command silently did nothing (the new window could open behind the
   // existing one, or the two would race on the same files).
+  // Windows fires the registered context-menu command once *per selected
+  // file* when multiple are selected (not one call with every path) — a
+  // real, documented quirk of registry-based shell commands, not
+  // something MultiSelectModel alone fixes. Each of those launches comes
+  // through here in quick succession (the first cold-starts the app, the
+  // rest arrive as single-instance relaunch events). For the add-related
+  // actions, merge same-mode calls that land within a short window into
+  // one instead of the dialog/quick-add flickering through N single-file
+  // launches or silently ending up with just the last one.
+  const launchBatchRef = useRef<{ mode: string; paths: string[]; timer: ReturnType<typeof setTimeout> } | null>(null);
+  function queueLaunchAction(action: LaunchAction) {
+    if (action.mode !== "add-dialog" && action.mode !== "add-default" && action.mode !== "add-and-mail") {
+      handleLaunchAction(action);
+      return;
+    }
+    const mode = action.mode;
+    const pending = launchBatchRef.current;
+    const paths = pending && pending.mode === mode ? [...pending.paths, ...action.paths] : [...action.paths];
+    if (pending) clearTimeout(pending.timer);
+    const timer = setTimeout(() => {
+      launchBatchRef.current = null;
+      handleLaunchAction({ mode, paths } as LaunchAction);
+    }, 300);
+    launchBatchRef.current = { mode, paths, timer };
+  }
+
   async function handleLaunchAction(action: LaunchAction) {
     try {
       if (action.mode === "add-dialog") {
@@ -272,6 +324,7 @@ export default function App() {
           testAfter: false,
           comment: "",
           smartStore: true,
+          separate: false,
         });
       } else if (action.mode === "add-and-mail") {
         const dest = await runCreate(action.paths, {
@@ -283,11 +336,24 @@ export default function App() {
           testAfter: false,
           comment: "",
           smartStore: true,
+          separate: false,
         });
         if (dest) await invoke("reveal_in_file_manager", { path: dirname(dest) });
       } else if (action.mode === "extract-here") {
         const src = action.paths[0];
-        await extractTo(src, dirname(src));
+        // Best-effort: if listing fails for any reason (encrypted archive,
+        // corrupt file, whatever), just fall back to the plain old
+        // behavior — extractTo's own password/error handling takes it
+        // from there exactly as before. Smart-extract only ever improves
+        // the destination when it can, never blocks the extract itself.
+        let destination = dirname(src);
+        try {
+          const listed = await api.listArchive(src);
+          destination = smartExtractDestination(src, listed.entries);
+        } catch {
+          // fall through with the plain destination
+        }
+        await extractTo(src, destination);
       } else if (action.mode === "open-archive") {
         await loadArchive(action.path);
       }
@@ -784,11 +850,22 @@ export default function App() {
       <AddArchiveDialog
         open={dialogSources !== null}
         defaultName={dialogSources ? defaultInitName(dialogSources[0]) : ""}
+        sourceCount={dialogSources?.length ?? 0}
         onCancel={() => setDialogSources(null)}
         onConfirm={async (result: ArchiveDialogResult) => {
           const sources = dialogSources;
           setDialogSources(null);
-          if (sources) await runCreate(sources, result);
+          if (!sources) return;
+          if (result.separate && sources.length > 1) {
+            // One archive per item — run sequentially so progress/busy
+            // state (shared globally) reflects one operation at a time
+            // instead of overlapping.
+            for (const source of sources) {
+              await runCreate([source], { ...result, name: defaultNameForFormat(source, result.format) });
+            }
+          } else {
+            await runCreate(sources, result);
+          }
         }}
       />
 

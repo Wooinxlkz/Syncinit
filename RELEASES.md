@@ -1,5 +1,51 @@
 # Releases
 
+## v0.1.18
+
+**Actually found the context-menu bug, from real data.** Your Diagnostics
+screenshot showed the exact smoking gun: `argv` was
+`["...\syncinit.exe", "--add-default"]` — no file path at all. Windows'
+`%*` token, used in the "Add to archive…" / "Add to .init archive" /
+"Compress and email…" command strings, was expanding to *nothing*, even
+for a single selected file. Confirmed against real, documented reports of
+this exact Windows quirk: `%*` is well known to be unreliable in
+registry-based shell commands, while `%1` is universally reliable (and is
+what Open/Extract Here were already using, which is why those never had
+this problem). Switched all three add-related commands from `%*` to `%1`.
+
+Side effect worth knowing about: with `%1`, selecting *multiple* files and
+choosing "Add to archive…" launches Syncinit once per selected file
+(a real, documented Windows behavior for this kind of registration), not
+once with every path. Added a short batching window on the receiving end
+so those rapid-fire single-file launches get merged into one dialog/one
+quick-add instead of flickering through N separate ones or silently
+ending up with just the last file.
+
+## v0.1.17
+
+Two of the four "cool features" ideas — the two that are frontend-only
+(zero Rust changes), deliberately, after last version's build break from
+a Rust edit gone wrong. Not risking that twice in one week.
+
+- **Smart Extract Here** — matches 7-Zip/WinRAR: if an archive already
+  wraps everything in one top-level folder, "Extract Here" behaves as
+  before (its contents land inside that folder, nothing spills out). If
+  it has multiple loose top-level files/folders instead, they now get
+  their own new folder (named after the archive) rather than spilling
+  directly into whatever folder the archive itself was sitting in.
+  Only affects "Extract Here" from Explorer — "Extract to…", where you
+  explicitly pick a destination yourself, is untouched, since second-
+  guessing an explicit choice would be the wrong call.
+- **Batch compress** — the Add-to-archive dialog now offers "Create a
+  separate archive for each item" whenever more than one file/folder is
+  selected. Off by default (combines into one archive, exactly like
+  before); check it and each selected item gets its own archive instead.
+
+Still on the list, each a real standalone undertaking rather than a
+quick add — planned as separate efforts, not bundled into one risky
+patch: a CLI tool, PAR2-style recovery records, and scheduled integrity
+checks on a watched folder.
+
 ## v0.1.16
 
 New feature (from the "what's worth adding" discussion) — first of the
